@@ -1,0 +1,59 @@
+# Josh: handoff
+
+_Last updated: 2026-11-16_
+
+## Owns
+**PR 1 series: client shell.** The SolidJS PWA at `apps/client/` and its Capacitor iOS/Android wrapper: offline shell, PWA, native plugins, store builds, OTA updates.
+
+## Status
+Not started. The repo is empty; PR 1.1 is next. Design references are still to come and will set the Tailwind theme and shell layout (PR 1.2).
+
+### PR plan
+| PR | Scope | Blocked on |
+|---|---|---|
+| 1.1 Scaffold | pnpm workspace, `apps/client` (SolidJS, Vite, strict TypeScript, Tailwind v4), lint/format, CI (lint, type-check, test, build), `size-limit` budget: **entry JS + CSS under 35KB gzipped** | none |
+| 1.2 App shell | Small custom router (measured against `@solidjs/router`), navigation, schedule from bundled sample data, storage interface (IndexedDB on web, `localStorage` snapshot for the first render), `shell:rendered` performance mark, design tokens | design references |
+| 1.3 PWA | Workbox service worker (`vite-plugin-pwa`, `injectManifest`), manifest and maskable icons, offline fallback, Lighthouse CI (Performance ≥ 95, Accessibility and Best Practices = 100), installability check | none |
+| 1.4 Capacitor | iOS and Android projects, `com.geauxhack.app`, icons and splash, native SQLite storage backend, plugins loaded on demand (only on native), haptics, offline cold-start measurement on physical devices (under 100ms, Airplane Mode) | none |
+| 1.5 Scanner + push | `@capacitor-mlkit/barcode-scanning` (camera permissions), `@capacitor/push-notifications` (APNs key, Firebase `google-services.json`, secrets kept out of git) | ops: Apple Developer account, Firebase project |
+| 1.6 Store builds | fastlane `ios beta` (local Mac) and `android beta`, signing set up, TestFlight and Play Closed Testing live on physical devices | ops: store accounts, 12 testers |
+| 1.7 Deep links | Associated Domains / App Links for `app.geauxhack.org` (`/judge/:token`, `/auth/callback`, `/n/:id`) | infra: hosting the `.well-known` files |
+| 1.8 OTA | `@capgo/capacitor-updater` self-hosted: signed bundles, `manifest.json` with minimum native version, update check on foreground, rollback via `notifyAppReady()`, CI publishing step. Built and tested against a local server first. | infra: CDN bucket for the production setup |
+
+## Decisions
+- **SolidJS**, chosen over Preact for the smallest runtime and no virtual DOM.
+- **Capacitor: latest stable major.** Not 6: its Android target SDK is below Google Play's current requirement.
+- **App ID / bundle ID: `com.geauxhack.app`.** It can't be changed after the first store upload.
+- **Production domain: `app.geauxhack.org`.**
+- **Router:** build a small custom one and measure it against `@solidjs/router`. The result goes in this file.
+- **Lighthouse:** the PWA category was removed in Lighthouse 12. It's replaced with Performance ≥ 95, Accessibility = 100, Best Practices = 100, plus installability checks.
+- **100ms offline startup** is measured from WebView `performance.timeOrigin` to the `shell:rendered` mark. It's the median of 10 cold starts in Airplane Mode on a physical iPhone and a physical mid-range Android phone.
+- **Google Play is a personal account**, so 12 testers have to be opted in for 14 days in a row. The 14-day clock must **start by 2026-12-15**.
+- **iOS builds happen on Josh's Mac** through fastlane.
+- **Hosting is decided later.** Until then, PR 1.1–1.6 and the local version of 1.8 don't depend on it.
+- **The web build never includes native plugins.** Every Capacitor plugin is imported on demand, only on native.
+
+## Provides to others
+- **Reserved client routes** (unstable until 1.2 merges): `/`, `/schedule`, `/judge/:token`, `/auth/callback`, `/n/:short_id`, `/privacy`.
+- **Storage interface** (1.2): a key-value and table store with a web backend (IndexedDB) and a native backend (SQLite). The auth PR's token storage and the scanner's local scan queue should use it, or sit next to it, rather than adding a second storage layer.
+- **Client calls to the API are same-origin** (`/api/v1/...`). On native they use `Authorization: Bearer`; on web, cookies. This matches the auth ticket.
+- **Signing details for deep links** (1.6–1.7): the Apple Team ID and the SHA-256 fingerprint of the Android signing certificate, for the `.well-known` files.
+
+## Needs from others
+| For | What's needed | Why / blocks | By |
+|---|---|---|---|
+| ops | Apple Developer Program enrollment and an App Store Connect app record for `com.geauxhack.app` | PR 1.5 (APNs key), PR 1.6 (TestFlight) | 2026-12-01 |
+| ops | Google Play Console personal account (identity verified) and a Play app record for `com.geauxhack.app` | PR 1.6 | 2026-12-01 |
+| ops | **12 or more testers** with Google account emails who will stay opted in to Closed Testing for 14 days in a row | Google Play production access; the clock must start by 12-15 | 2026-12-10 |
+| ops | Firebase project with an Android app `com.geauxhack.app`; APNs auth key (.p8) uploaded to Firebase | PR 1.5 push | 2026-12-05 |
+| ops | Privacy policy text, to be published at `https://app.geauxhack.org/privacy` | Both stores require a privacy policy URL | 2026-12-08 |
+| infra | Host the PWA at `app.geauxhack.org`, with `/api/*` and `/api/v1/ws` routed to the Rust server on the **same origin** | Production PWA; same-origin cookies for auth | before the January mock run |
+| infra | Serve `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json` with content type `application/json` and no redirects. Josh's agent supplies the file contents. | PR 1.7 deep links | when hosting exists |
+| infra | Serve `sw.js` and `index.html` with `Cache-Control: no-cache`; hashed assets cached as `immutable` | Service worker updates propagate to users | when hosting exists |
+| infra | CDN bucket and URL for OTA bundles plus `manifest.json`; a CI secret allowed to upload to it | PR 1.8 production setup | before the January mock run |
+| backend | Response shapes for the schedule and the current user's profile (for the offline snapshot). Until they exist, the client uses bundled sample data in the same shape. | Swapping fixtures for real API calls after PR 1.2 | not blocking |
+| auth | Which secure-storage plugin is used for the native token, so PR 1.4 doesn't add a conflicting one | PR 1.4 | not blocking |
+
+## Done for others
+| For | What was done | Link |
+|---|---|---|
