@@ -950,6 +950,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gh-bench"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "gh-server",
+ "mimalloc",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tokio-util",
+]
+
+[[package]]
 name = "gh-server"
 version = "0.1.0"
 dependencies = [

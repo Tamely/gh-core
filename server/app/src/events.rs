@@ -107,12 +107,18 @@ fn redis_config(url: &str) -> Result<Builder, Error> {
     Ok(builder)
 }
 
+/// Connects a publish-only client (no subscriber), e.g. for tools.
+pub async fn publisher(url: &str) -> Result<Events, Error> {
+    let pool = redis_config(url)?.build_pool(2)?;
+    pool.init().await?;
+    Ok(Events { pool })
+}
+
 /// Connects the publishing pool and the dedicated subscriber connection, and
 /// starts forwarding Redis events into `hub`.
 pub async fn connect(url: &str, hub: Arc<Hub>) -> Result<(Events, SubscriberClient), Error> {
+    let events = publisher(url).await?;
     let builder = redis_config(url)?;
-    let pool = builder.build_pool(2)?;
-    pool.init().await?;
 
     let subscriber = builder.build_subscriber_client()?;
     subscriber.init().await?;
@@ -122,7 +128,7 @@ pub async fn connect(url: &str, hub: Arc<Hub>) -> Result<(Events, SubscriberClie
     gauge!("redis_connected").set(1.0);
 
     spawn_forwarding(&subscriber, hub);
-    Ok((Events { pool }, subscriber))
+    Ok((events, subscriber))
 }
 
 fn spawn_forwarding(subscriber: &SubscriberClient, hub: Arc<Hub>) {

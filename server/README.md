@@ -99,3 +99,21 @@ frame or message over 4KB, 1012 server restarting, 1013 too slow.
 
 `db_pool_waiting` counts requests inside `db::acquire`, so handlers should
 take connections through it.
+
+## Load test (`bench/`)
+
+`gh-bench` opens WebSocket clients spread over rooms, teams, mentor tags and
+one user topic each, publishes events through Redis at a fixed rate, and fails
+unless every client got every event in order, nobody was dropped, and the p99
+time from publish to reaching every subscriber is under `--p99-ms` (default 5).
+Run it on the same machine as the server so both use one clock:
+
+```sh
+docker compose up -d
+docker build -t gh-server . && docker build --target bench -t gh-bench .
+docker run -d --name gh --cpus=2 --network server_default   -e DATABASE_URL=postgres://gh:gh@postgres:5432/gh -e REDIS_URL=redis://redis:6379 gh-server
+docker run --rm --network server_default gh-bench   --url ws://gh:8080/api/v1/ws --redis redis://redis:6379 --clients 1000 --rate 100 --duration 600
+```
+
+Repeat `--url` to spread clients over several instances. Watch server memory
+with `docker stats gh` while it runs.
