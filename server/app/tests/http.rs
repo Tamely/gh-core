@@ -49,6 +49,7 @@ async fn generates_request_id_or_keeps_the_clients() {
 
     use tower::ServiceExt;
     let res = app
+        .clone()
         .oneshot(
             axum::http::Request::get("/healthz")
                 .header("x-request-id", "client-chosen")
@@ -58,6 +59,27 @@ async fn generates_request_id_or_keeps_the_clients() {
         .await
         .unwrap();
     assert_eq!(res.headers()["x-request-id"], "client-chosen");
+
+    // IDs that are too long or could mess with logs are replaced.
+    for bad in [
+        "x".repeat(65),
+        "has space".into(),
+        "quote\"".into(),
+        String::new(),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(
+                axum::http::Request::get("/healthz")
+                    .header("x-request-id", &bad)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let id = res.headers()["x-request-id"].to_str().unwrap();
+        assert_eq!(id.len(), 36, "{bad:?} should be replaced, got {id}");
+    }
 }
 
 #[tokio::test]

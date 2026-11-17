@@ -87,6 +87,24 @@ pub fn with_middleware(router: Router) -> Router {
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+        .layer(middleware::map_request(drop_bad_request_id))
+}
+
+/// A client may send its own `x-request-id` to trace a request end to end,
+/// but it lands in every log line, so only short plain IDs are kept. Anything
+/// else is replaced with a fresh UUID.
+async fn drop_bad_request_id(mut req: axum::extract::Request) -> axum::extract::Request {
+    let ok = |v: &HeaderValue| {
+        let v = v.as_bytes();
+        !v.is_empty()
+            && v.len() <= 64
+            && v.iter()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(b))
+    };
+    if req.headers().get("x-request-id").is_some_and(|v| !ok(v)) {
+        req.headers_mut().remove("x-request-id");
+    }
+    req
 }
 
 pub fn app(state: AppState) -> Router {
