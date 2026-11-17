@@ -34,7 +34,7 @@ docker run --rm -p 8080:8080 -e DATABASE_URL=... -e REDIS_URL=... gh-server
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | required | Postgres connection string |
-| `DB_MAX_CONNECTIONS` | `20` | Pool size. Two instances run side by side during a deploy, so keep 2 × this well below Postgres's `max_connections` |
+| `DB_MAX_CONNECTIONS` | `20` | Pool size. Each instance also keeps 1 connection for `/readyz`, and two instances run side by side during a deploy, so keep 2 × (this + 1) well below Postgres's `max_connections` |
 | `DB_MIN_CONNECTIONS` | `2` | Connections kept open while idle |
 | `REDIS_URL` | required | Redis connection string |
 | `HTTP_PORT` | `8080` | Public HTTP port |
@@ -57,7 +57,11 @@ docker run --rm -p 8080:8080 -e DATABASE_URL=... -e REDIS_URL=... gh-server
   with the old code (add columns and tables; drop them in a later deploy).
 - **Health:** `/healthz` is 200 while the process runs. `/readyz` is 200 only
   when Postgres and Redis both answer within 500ms and the server isn't
-  shutting down.
+  shutting down. It checks Postgres on its own connection, so a full pool
+  doesn't make the instance look broken (overload is answered with 503s on
+  the requests themselves).
+- **Request IDs** from clients are kept only if they're up to 64 characters
+  of letters, digits and `-_.:`; otherwise a UUID is used.
 - **SIGTERM:** `/readyz` goes 503, WebSocket clients are closed with 1012 and
   new upgrades get 503, new connections are refused after
   `SHUTDOWN_DELAY_MS`, in-flight requests finish, and the process exits
@@ -72,7 +76,9 @@ docker run --rm -p 8080:8080 -e DATABASE_URL=... -e REDIS_URL=... gh-server
 Events arrive as `{"topic","seq","type","payload"}`. `seq` goes up by exactly
 one per topic, the same on every instance. On a gap, or on
 `{"type":"resync","topic"}`, reload that topic over REST; events aren't
-replayed.
+replayed. The `subscribed` reply always arrives before the topic's first
+event. If Redis restarts without persistence, `seq` starts again at 1; clients
+get `resync` first, and the jump reads as a gap anyway.
 
 Server code publishes with `state.events.publish(&topic, "type", &payload)`.
 Every event goes through Redis (`gh:events:{topic}`), and every instance
@@ -117,3 +123,8 @@ docker run --rm --network server_default gh-bench   --url ws://gh:8080/api/v1/ws
 
 Repeat `--url` to spread clients over several instances. Watch server memory
 with `docker stats gh` while it runs.
+
+Slow-client check: `--slow 1 --pad 1024 --metrics http://gh:9090/metrics`
+adds a client subscribed to every room and mentor tag that never reads. It
+passes only if the server cuts that client off for being slow and the other
+clients still meet the latency target.

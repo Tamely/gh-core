@@ -14,6 +14,7 @@ Four stacked branches, local only, not pushed yet. Each builds on the one before
 | `kenny/server-database` | sqlx pool with timeouts, 503 + `Retry-After` on overload, startup migrations (design doc §5), `/readyz`, `docker-compose.yml` | done |
 | `kenny/server-realtime` | Redis fan-out, WebSocket hub at `/api/v1/ws`, `resync`/1013/1012, `/metrics` on port 9090 | done |
 | `kenny/server-bench` | `server/bench` load tool, plus three fixes it found: `TCP_NODELAY`, metrics upkeep, resync after re-subscribe | done |
+| `kenny/server-hardening` | `/readyz` on its own connection, request-ID validation, subscribe reply ordering, slow clients in the bench, test and build fixes | done |
 
 PR descriptions are drafted in `pr-drafts/` (not committed).
 
@@ -25,7 +26,9 @@ Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machin
 - SIGTERM with 1,000 clients: all got 1012, exit 0 after 5.5s.
 - Image 11.5MB.
 
-Known: `queue_positions_can_be_swapped_but_not_duplicated` failed once in about 15 full-suite runs on a loaded laptop and never again; the error wasn't captured. Suspect the 2s acquire or statement timeout while many test containers start at once. If CI shows it, the panic message will say which.
+- Slow client (`--slow 1 --pad 1024`, 3 minutes): the stuck client was cut off for being slow (server counter 1), the other 1,000 got every event at p99 3.8ms (4.7ms without it).
+
+Test flake: `queue_positions_can_be_swapped_but_not_duplicated` failed once in about 15 full runs and couldn't be reproduced. Schema tests now use a plain pool instead of the 2s production limits, and CI runs 4 tests at a time. Heavier stress (30 containers at once) only produced container startup timeouts.
 
 Not started: Josh's backend requests (application API, team pick endpoint with the 52% cap, schedule and profile shapes). The live team split needs one more topic kind (e.g. a single `event:split` topic); adding a kind is a few lines in `server/app/src/topic.rs`.
 
@@ -42,6 +45,10 @@ Not started: Josh's backend requests (application API, team pick endpoint with t
 - **Migration = design doc §5 + two fixes:** `gen_random_uuid()` instead of `uuid-ossp`, and `judging_queue (room_id, seq_index)` is `DEFERRABLE INITIALLY DEFERRED` so "Swap with On-Deck Team" works in one statement.
 - **Static check uses `readelf -d` (no `NEEDED` entries).** Rust's musl target builds static-pie, which `ldd` reports as "statically linked", not "not a dynamic executable".
 - **No `.sqlx` folder yet:** nothing uses the `query!` macros. Add `cargo sqlx prepare` output when the first one lands.
+- **`/readyz` checks Postgres on its own one-connection pool.** On the shared pool, a burst that filled all 20 connections made every instance report not ready together, and a load balancer could pull them all.
+- **Client `x-request-id` values are kept only if short and plain** (64 chars of `A-Za-z0-9-_.:`), because they go into every log line.
+- **The subscribe reply is queued before forwarding starts**, so `subscribed` always comes before the topic's first event.
+- **Dev builds drop dependency debug info.** `target/` hit 10.5GB and filled the disk; now about 2GB.
 - **Use `127.0.0.1`, not `localhost`, in local URLs.** On Windows, `localhost` tries IPv6 first and takes about 2s to fall back, which is the whole acquire timeout.
 
 ## Provides to others
