@@ -6,13 +6,17 @@ _Last updated: 2026-11-17_
 **PR 1 series: client shell.** The SolidJS PWA at `apps/client/` and its Capacitor iOS/Android wrapper: offline shell, PWA, native plugins, store builds, OTA updates.
 
 ## Status
-- **PR 1.1 (scaffold):** draft PR open at https://github.com/Tamely/gh-core/pull/1.
-- **PR 1.2 (app shell):** committed on branch `pr-1.2-app-shell` (built on 1.1), not pushed yet.
+Three stacked draft PRs; merge them in order:
+
+- **PR 1.1 (scaffold):** https://github.com/Tamely/gh-core/pull/1, targeting `main`.
+- **PR 1.2 (app shell):** https://github.com/Tamely/gh-core/pull/2, targeting `pr-1.1-scaffold`.
   - Contents: theme, Allo, the custom router, storage, five glass tabs, and Home and Schedule from sample data.
   - Home and Schedule were reworked away from stacked cards: the countdown is type on the page, Up next is a timeline, and Schedule is a divided list with sticky day headers.
   - All checks pass (16 tests). The initial shell is 14.09KB gzipped.
-- **Landing page:** branch `landing-page` (built on 1.2), not pushed yet.
-  - New `apps/site`, the public site for `geauxhack.com`. The hero is as simple as HackUTD's, followed by the story chapters, a hover split for Beau vs. Parkeaux, District rows, a dates timeline, FAQ, a sponsor band and the footer. No cards.
+- **Landing page:** https://github.com/Tamely/gh-core/pull/3, targeting `pr-1.2-app-shell`.
+  - New `apps/site`, the public site for `geauxhack.com`.
+  - Until registration opens it's one screen, like HackMIT's: a full-screen hero (as simple as HackUTD's, with the crown dropping into the pothole every 4s), a notify-me field and a sponsor line.
+  - The story, Beau vs. Parkeaux split, District rows, FAQ and sponsor band appear when `REGISTRATION_OPEN` is true. No cards.
   - New `packages/brand` holds the theme CSS shared by the app and the site.
 - **Design:** [`docs/design.md`](../docs/design.md). The style canvas (link under Decisions) now matches the code, with Home, Schedule and the landing hero.
 
