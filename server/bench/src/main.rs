@@ -10,6 +10,12 @@
 //!          --clients 1000 --rate 100 --duration 600
 //! ```
 //! `--url` can be repeated; clients are spread over the URLs round-robin.
+//!
+//! `--slow N` adds N clients that subscribe to every room and mentor tag and
+//! then never read. The normal clients must still pass, and the server must
+//! cut the slow ones off. `--pad BYTES` makes events bigger so a stuck client
+//! backs up faster, and `--metrics http://host:9090/metrics` reads the
+//! server's counters at the end to show why the slow clients were cut off.
 
 use std::{
     collections::HashMap,
@@ -23,7 +29,8 @@ use std::{
 use futures_util::{SinkExt, StreamExt};
 use gh_server::{events, events::now_us, topic::Topic};
 use serde_json::{Value, json};
-use tokio_tungstenite::tungstenite::Message;
+use tokio::net::{TcpSocket, TcpStream};
+use tokio_tungstenite::{MaybeTlsStream, tungstenite::Message};
 use tokio_util::sync::CancellationToken;
 
 #[global_allocator]
@@ -39,6 +46,9 @@ struct Args {
     rate: u64,
     duration: Duration,
     p99_limit: Duration,
+    slow: usize,
+    pad: usize,
+    metrics: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -52,6 +62,9 @@ fn parse_args() -> Args {
         rate: 100,
         duration: Duration::from_secs(600),
         p99_limit: Duration::from_millis(5),
+        slow: 0,
+        pad: 0,
+        metrics: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -73,6 +86,9 @@ fn parse_args() -> Args {
             "--rate" => args.rate = number(),
             "--duration" => args.duration = Duration::from_secs(number()),
             "--p99-ms" => args.p99_limit = Duration::from_millis(number()),
+            "--slow" => args.slow = number() as usize,
+            "--pad" => args.pad = number() as usize,
+            "--metrics" => args.metrics = Some(value.clone()),
             _ => usage(&format!("unknown flag {flag}")),
         }
     }
@@ -88,7 +104,8 @@ fn parse_args() -> Args {
 fn usage(problem: &str) -> ! {
     eprintln!(
         "{problem}\nusage: gh-bench [--url ws://...]... [--redis redis://...] [--clients N] \
-         [--rooms N] [--teams N] [--tags N] [--rate EVENTS_PER_SEC] [--duration SECS] [--p99-ms MS]"
+         [--rooms N] [--teams N] [--tags N] [--rate EVENTS_PER_SEC] [--duration SECS] [--p99-ms MS] [--slow N] [--pad BYTES] \
+         [--metrics URL]"
     );
     std::process::exit(2);
 }
@@ -234,6 +251,96 @@ async fn client(
     }
 }
 
+type Ws = tokio_tungstenite::WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// Topics a slow client subscribes to: every room and mentor tag (the
+/// busiest ones), up to the server's 50-subscription limit.
+fn slow_topics(a: &Args) -> Vec<String> {
+    (0..a.rooms)
+        .map(|r| format!("room:r{r}"))
+        .chain((0..a.tags).map(|t| format!("mentor-tag:tag{t}")))
+        .take(50)
+        .collect()
+}
+
+/// Connects with a 4KB receive buffer, subscribes, and returns the socket
+/// without reading from it again.
+async fn slow_client(url: &str, topics: &[String]) -> Ws {
+    let host = url.trim_start_matches("ws://").split('/').next().unwrap();
+    let addr = tokio::net::lookup_host(host).await.unwrap().next().unwrap();
+    let socket = if addr.is_ipv4() {
+        TcpSocket::new_v4()
+    } else {
+        TcpSocket::new_v6()
+    }
+    .unwrap();
+    socket.set_recv_buffer_size(4096).unwrap();
+    let stream = socket.connect(addr).await.expect("slow client connect");
+    let (mut ws, _) = tokio_tungstenite::client_async(url, MaybeTlsStream::Plain(stream))
+        .await
+        .expect("slow client upgrade");
+    for topic in topics {
+        let subscribe = json!({ "op": "subscribe", "topic": topic }).to_string();
+        ws.send(Message::text(subscribe)).await.unwrap();
+    }
+    let mut confirmed = 0;
+    while confirmed < topics.len() {
+        match ws.next().await {
+            Some(Ok(Message::Text(t))) if t.contains("\"subscribed\"") => confirmed += 1,
+            Some(Ok(Message::Text(t))) if t.contains("\"error\"") => panic!("slow client: {t}"),
+            Some(Ok(_)) => {}
+            other => panic!("slow client lost before subscribing: {other:?}"),
+        }
+    }
+    ws
+}
+
+/// Reads what a slow client was left with and says how it ended.
+async fn slow_outcome(mut ws: Ws) -> &'static str {
+    let mut resync = false;
+    loop {
+        match tokio::time::timeout(Duration::from_secs(10), ws.next()).await {
+            Err(_) => return "still connected",
+            Ok(Some(Ok(Message::Text(t)))) => resync |= t.contains("\"resync\""),
+            Ok(Some(Ok(Message::Close(Some(f))))) if u16::from(f.code) == 1013 => {
+                return if resync {
+                    "resync then 1013"
+                } else {
+                    "1013 without resync"
+                };
+            }
+            Ok(Some(Ok(Message::Close(_)))) => return "closed with another code",
+            Ok(Some(Ok(_))) => {}
+            // The server gave up delivering the close frame to a client that
+            // wasn't reading, and dropped the socket.
+            Ok(Some(Err(_)) | None) => return "cut off (socket dropped)",
+        }
+    }
+}
+
+/// Fetches a Prometheus page over plain HTTP/1.0.
+async fn scrape(url: &str) -> std::io::Result<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let rest = url.trim_start_matches("http://");
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let mut stream = TcpStream::connect(host).await?;
+    let request = format!("GET /{path} HTTP/1.0\r\nHost: {host}\r\n\r\n");
+    stream.write_all(request.as_bytes()).await?;
+    let mut body = String::new();
+    stream.read_to_string(&mut body).await?;
+    Ok(body)
+}
+
+fn metric(page: &str, name: &str) -> Option<f64> {
+    page.lines().find_map(|line| {
+        line.strip_prefix(name)?
+            .strip_prefix(' ')?
+            .trim()
+            .parse()
+            .ok()
+    })
+}
+
 fn percentile(sorted: &[u64], p: f64) -> u64 {
     if sorted.is_empty() {
         return 0;
@@ -287,6 +394,20 @@ async fn main() {
         args.clients
     );
 
+    let topics = slow_topics(&args);
+    let mut slow = Vec::with_capacity(args.slow);
+    for i in 0..args.slow {
+        slow.push(slow_client(&args.urls[i % args.urls.len()], &topics).await);
+    }
+    if args.slow > 0 {
+        println!(
+            "{} slow client(s) subscribed to {} topics each and stopped reading",
+            args.slow,
+            topics.len()
+        );
+    }
+    let pad = "x".repeat(args.pad);
+
     let events = events::publisher(&args.redis)
         .await
         .expect("connect to Redis");
@@ -299,7 +420,7 @@ async fn main() {
         tick.tick().await;
         let topic = Topic::parse(&event_topic(published, &args)).unwrap();
         events
-            .publish(&topic, "bench", &json!({ "t": now_us() }))
+            .publish(&topic, "bench", &json!({ "t": now_us(), "pad": pad }))
             .await
             .expect("publish");
         expected += subscribers(published, &args);
@@ -367,6 +488,36 @@ async fn main() {
     }
 
     let mut failures = Vec::new();
+    if !slow.is_empty() {
+        let mut outcomes: HashMap<&str, usize> = HashMap::new();
+        for ws in slow {
+            *outcomes.entry(slow_outcome(ws).await).or_default() += 1;
+        }
+        println!("slow clients: {outcomes:?}");
+        if let Some(n) = outcomes.get("still connected") {
+            failures.push(format!("{n} slow client(s) never cut off"));
+        }
+    }
+    if let Some(url) = &args.metrics {
+        match scrape(url).await {
+            Ok(page) => {
+                let get = |name| metric(&page, name).unwrap_or(f64::NAN);
+                let cut = get("ws_slow_client_disconnects_total");
+                println!(
+                    "server: {cut} slow-client disconnects, {} resyncs, {} connections left",
+                    get("ws_resyncs_total"),
+                    get("ws_connections"),
+                );
+                if args.slow > 0 && cut < args.slow as f64 {
+                    failures.push(format!(
+                        "server cut off {cut} of {} slow clients for being slow",
+                        args.slow
+                    ));
+                }
+            }
+            Err(e) => failures.push(format!("can't read {url}: {e}")),
+        }
+    }
     if dropped > 0 || errors > 0 {
         failures.push(format!("{dropped} dropped, {errors} errors"));
     }
@@ -405,6 +556,9 @@ mod tests {
             rate: 100,
             duration: Duration::ZERO,
             p99_limit: Duration::ZERO,
+            slow: 0,
+            pad: 0,
+            metrics: None,
         }
     }
 
@@ -434,6 +588,23 @@ mod tests {
                 Topic::parse(&topic).unwrap();
             }
         }
+    }
+
+    #[test]
+    fn slow_topics_stay_under_the_subscription_limit() {
+        let mut a = args(10);
+        assert_eq!(slow_topics(&a).len(), 35);
+        a.rooms = 100;
+        assert_eq!(slow_topics(&a).len(), 50);
+    }
+
+    #[test]
+    fn reads_prometheus_values() {
+        let page =
+            "# TYPE x counter\nws_resyncs_total 3\nws_resyncs_total_x 9\nws_connections 1000\n";
+        assert_eq!(metric(page, "ws_resyncs_total"), Some(3.0));
+        assert_eq!(metric(page, "ws_connections"), Some(1000.0));
+        assert_eq!(metric(page, "missing"), None);
     }
 
     #[test]
