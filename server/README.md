@@ -85,6 +85,9 @@ event. If Redis restarts without persistence, `seq` starts again at 1; clients
 get `resync` first, and the jump reads as a gap anyway.
 
 Server code publishes with `state.events.publish(&topic, "type", &payload)`.
+A publish that times out may still have gone through, so a retry can deliver
+an event twice (with a new `seq`). Make payloads carry state ("room is now on
+team 7"), not changes ("advance by one").
 Every event goes through Redis (`gh:events:{topic}`), and every instance
 forwards it to its own clients, so it doesn't matter which instance a client
 is on. A Lua script bumps `gh:seq:{topic}` and publishes in one step.
@@ -132,3 +135,28 @@ Slow-client check: `--slow 1 --pad 1024 --metrics http://gh:9090/metrics`
 adds a client subscribed to every room and mentor tag that never reads. It
 passes only if the server cuts that client off for being slow and the other
 clients still meet the latency target.
+
+### Resilience runs
+
+All with the server limited to 2 CPUs and the bench in Docker on the same host.
+
+**Rolling deploy.** Clients get `--url` for both instances and `--reconnect`, then one instance is stopped while the other runs:
+
+```sh
+docker run --rm --network server_default gh-bench --url ws://gh-a:8080/api/v1/ws --url ws://gh-b:8080/api/v1/ws --reconnect --redis redis://redis:6379 --duration 160
+# meanwhile: start gh-b, docker stop gh-a, start gh-a, docker stop gh-b
+```
+
+Measured (1,000 clients, A to B and back): 2,000 reconnects, all 1,000 connected at the end, 0 unannounced seq gaps, 0 clients refused during a drain, 0 to 2s without updates per move (the reconnect jitter), p99 4.1ms throughout.
+
+**Redis and Postgres restarts.** `docker restart server-redis-1`, later `docker restart server-postgres-1`, under 1,000 clients with `--reconnect`: no client disconnected. Redis was down 1.3s and every one of the 4,000 subscriptions got one `resync`. `/readyz` was 503 for about 1.2s each time, `/healthz` stayed 200. Events published during the Redis outage wait up to 1s in the client's retry queue, so latency for that window reads up to 0.9s.
+
+**Bad Wi-Fi and frozen phones.** Delay and loss come from `tc netem`, run from a helper container that shares the bench's (and, for the return path, the server's) network:
+
+```sh
+docker run --rm --network container:bench-bad --cap-add NET_ADMIN alpine:3.20 sh -c "apk add -q iproute2 && tc qdisc add dev eth0 root netem delay 150ms 50ms loss 5%"
+```
+
+Measured: 300 clients at ~300ms round trip and 5% loss each way, 700 normal clients, 50 frozen clients (`--slow 50`), separate topics via `--prefix`. Normal clients p99 3.2ms with every event delivered; bad-Wi-Fi clients all stayed connected and got every event (p50 0.36s, p99 1.7s); all 50 frozen clients were cut off for being slow.
+
+**One-hour soak.** 1,000 clients, 100 events/s, 60 minutes: 0 dropped, 0 gaps, 0 resyncs, 13,049,940 messages. Memory 65-68MB and open sockets steady at 1,016 the whole hour, back to 16 sockets after. p99 to every subscriber was 6.2ms over the hour (2.4ms over 10 minutes): the slow stretches coincide with moments when the bench, in a different container, also stalled for about a second, which points at the laptop's Docker VM rather than the server. Two publishes timed out during those stalls and were delivered anyway, which is why publishes must be safe to repeat.

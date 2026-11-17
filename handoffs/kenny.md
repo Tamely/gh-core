@@ -26,6 +26,10 @@ Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machin
 - Two instances on one Redis: every event delivered across instances, p99 2.5ms.
 - SIGTERM with 1,000 clients: all got 1012, exit 0 after 5.5s.
 - Image 11.5MB.
+- Rolling deploy (A to B and back, 1,000 clients): 2,000 reconnects, 0 unannounced gaps, 0-2s without updates per move.
+- Redis restart: 1.3s outage, every subscription got one `resync`, no client dropped. Postgres restart: `/readyz` 503 for ~1.1s, WebSockets unaffected.
+- Bad Wi-Fi (300 clients, ~300ms, 5% loss) next to 700 normal and 50 frozen: normal p99 3.2ms, bad clients all stayed and got everything, frozen ones cut off.
+- One-hour soak: no leaks (memory 65-68MB, sockets steady), 13M messages, 0 gaps. p99 6.2ms over the hour because of laptop VM stalls; re-measure on the real server.
 
 - Slow client (`--slow 1 --pad 1024`, 3 minutes): the stuck client was cut off for being slow (server counter 1), the other 1,000 got every event at p99 3.8ms (4.7ms without it).
 
@@ -50,6 +54,7 @@ Not started: Josh's backend requests (application API, team pick endpoint with t
 - **Client `x-request-id` values are kept only if short and plain** (64 chars of `A-Za-z0-9-_.:`), because they go into every log line.
 - **The subscribe reply is queued before forwarding starts**, so `subscribed` always comes before the topic's first event.
 - **Dev builds drop dependency debug info.** `target/` hit 10.5GB and filled the disk; now about 2GB.
+- **A publish that times out may still have happened** (seen twice in the soak). Retrying can deliver an event twice with a new `seq`, so event payloads should carry state, not changes. Whoever writes features should follow this.
 - **Redis commands time out after 1s.** The client's default is no timeout, so a publish during a Redis outage hung until the request timeout.
 - **Bursts don't look like slow clients.** The Redis client's event buffers hold 1024 messages (default 32; 8192 cost 22MB idle because every channel reserves its slots up front), and each connection's send queue is 512 (was 64). Before, a burst of a few dozen events made clients resync. Queued events share their bytes, so a full queue is about 20KB.
 - **Startup rejects URLs for the wrong service and port 0.** The Postgres driver ignores the scheme, so `mysql://host/db` connected to whatever Postgres was on that host.

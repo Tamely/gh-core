@@ -74,6 +74,12 @@ struct ClientEvent<'a> {
 
 impl Events {
     /// Publishes to every instance and returns the event's `seq`.
+    ///
+    /// An error after a timeout doesn't mean the event wasn't published:
+    /// Redis may still run the command a moment later. Retrying can then
+    /// deliver it twice, with two different `seq` values. So make events
+    /// carry state ("room is now on team 7"), not changes ("advance by
+    /// one"), so a repeat is harmless.
     pub async fn publish(
         &self,
         topic: &Topic,
