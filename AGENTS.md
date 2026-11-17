@@ -16,7 +16,7 @@ These rules apply to every AI agent working in this repo (Claude Code, Codex, Cu
 ## Commits and PRs
 
 - **Never list an AI as an author or contributor.** Don't add `Co-Authored-By:` trailers for Claude or any other AI, and don't add "Generated with …" lines to commit messages, PR descriptions or comments. Commits are authored by the human contributor only.
-- `.githooks/commit-msg` rejects commits that contain these lines. Enable it once per clone with `git config core.hooksPath .githooks`.
+- `.githooks/commit-msg` rejects commits that contain these lines. `pnpm install` turns it on automatically. Without pnpm, run `git config core.hooksPath .githooks` once per clone.
 
 ## Before you finish a session
 

@@ -1,0 +1,31 @@
+{
+  "name": "gh-core",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
+    "dev": "pnpm --filter @gh-core/client dev",
+    "build": "pnpm -r build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "budget": "pnpm --filter @gh-core/client budget",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm budget"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.15.0",
+    "eslint-plugin-solid": "0.19.0",
+    "globals": "17.14.0",
+    "prettier": "3.10.1",
+    "prettier-plugin-tailwindcss": "0.8.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2"
+  }
+}
