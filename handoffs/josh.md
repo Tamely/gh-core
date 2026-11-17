@@ -60,6 +60,7 @@ Not started. PR 1.1 is next. The design direction is in [`docs/design.md`](../do
 | design / art | SVG illustrations of Beau and the six Vespers (plus simple versions for small sizes), District icons, the Elysiu/Abyssus portal key art, and the app icon | PR 1.2 visuals, PR 1.4 icon and splash | 2026-12-05 |
 | backend | Application API: draft, submit, status, decision, confirmation deadline, waitlist release | PR 1.9 | not blocking |
 | backend | **Storyline features not in the architecture spec:** picking Team Beau or Team Parkeaux, point QR codes and side quests (a signed points ledger, scannable offline, like entitlements), a live team leaderboard over WebSocket, and the ending reveal decided by final points | Main event-app features | needs an owner |
+| backend | **Team pick endpoint with a 52% cap.** It locks the team row in the same transaction that inserts the pick, and rejects (409) a pick that would join a team already above 52%. It also publishes the current split over WebSocket so the picker's lock state updates live. Picks are final. Rules are in `docs/design.md`, "Picking a side". | Team picker screen | before the January mock run |
 | database | Tables for applications and their statuses, team alliance, and a points ledger. (These aren't in the schema ticket.) | PR 1.9 and the story features | needs an owner |
 | auth | Which secure-storage plugin is used for the native token, so PR 1.4 doesn't add a conflicting one | PR 1.4 | not blocking |
 

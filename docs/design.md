@@ -36,16 +36,18 @@ The app should feel **modern, round and bouncy, like a native iOS app**, and car
 **Simplicity, borrowed from HackUTD:** lots of empty space, one accent color per screen, near-black on a plain background, pill buttons, big tightly spaced headings, and a few deliberate, repeated animations rather than many different ones.
 
 - **Liquid glass tab bar.** The bottom nav floats over the content as a glass capsule, so content scrolls underneath it.
-  - **Web and Android:** CSS approximation using `backdrop-filter: blur(20px) saturate(180%)`, a translucent fill, a bright inner top edge, and a soft highlight gradient. Where `backdrop-filter` isn't supported, it falls back to a nearly solid fill.
+  - **Web and Android:** CSS approximation that should read clearly as glass: a light blur that keeps the content behind it visible (`backdrop-filter: blur(12px) saturate(230%) brightness(1.06)`), a mostly clear fill, a bright 1.5px rim, a strong top-left shine, and a purple glow along the inside bottom edge. Where `backdrop-filter` isn't supported, it falls back to a nearly solid fill.
   - **iOS 26 and later:** use Apple's real Liquid Glass material where possible. That needs a native tab bar (or a small custom Capacitor plugin using `UIGlassEffect`) over the WebView; decide in PR 1.4 whether it's worth the extra code. Older iOS versions use the CSS version.
   - The active tab gets a soft tinted lens behind its icon, not a solid fill.
 - **Things we avoid** (they read as generic AI-generated UI):
   - **Pill-shaped tags and badges** ("Web & App", "Workshop · +50 pts", "ON DECK" chips). Use an icon tile, colored text, or a heading inside the card instead. Buttons and the tab bar can stay capsule-shaped.
   - **Middle-dot separators between words** ("PFT 1240 · in 12 min"). Write a phrase ("Starts in 12 min in PFT 1240") or split it into two elements.
   - **Lists of three in copy** ("purple, gold, the crown"). Say the one or two things that matter.
+- **Tabs, the same in both themes:** Home, Schedule, Scan, Map, Battle. Profile and the QR pass open from the avatar button at the top of Home.
+- **The Beau vs Parkeaux battle lives only on the Battle tab.** Home shows urgent alerts, the countdown and what's next.
 - **Order screens by urgency:** anything that needs action now comes first (ON DECK and other judging alerts, then the hacking countdown), then what's next on the schedule. The Beau vs Parkeaux score only matters at the very end, so it sits below the alerts and countdown.
 - **No orange.** Parkeaux, alerts and "starts soon" use LSU gold.
-- **Battle card:** one card with both totals and a single split bar (Beau purple vs Parkeaux), the same design in both themes.
+- **Battle card:** one card with both totals in ink (black), team names in their colors (Beau purple, Parkeaux gold), and a single split bar of Beau purple against Parkeaux gold. Same design in both themes.
 - **Shape:** large corner radii (cards 20–28px, sheets 32px, buttons fully round). Cards float on a soft, layered background. iOS-style bottom tab bar and sheets that slide up.
 - **Motion:**
   - Spring easing written in CSS with `linear()`, not a JavaScript animation library, to protect the bundle budget.
@@ -78,7 +80,7 @@ Starting palette. Final hex values get checked for contrast (WCAG AA) when the T
 |---|---|---|
 | `beau` | Team Beau, primary | LSU purple `#461D7C` |
 | `crown` | Highlights, the crown, wins | LSU gold `#FDD023` |
-| `parkeaux` | Team Parkeaux | Asphalt `#1F1F24` with LSU gold `#FDD023`. Gold text on light backgrounds uses dark gold `#7A5C00` for contrast. |
+| `parkeaux` | Team Parkeaux | LSU gold `#FDD023`, the same gold as the crown. No dark mustard gold anywhere; text that would have used it is ink or muted instead. |
 | `paper` | Elysiu background | Cream `#FDF7EC` |
 | `abyss` | Abyssus background | `#0E0B14` |
 
@@ -116,6 +118,26 @@ We copy the **structure** of HackMIT's Plume portal, not its visuals, wording or
 6. **After confirming:** the dashboard becomes the event app (pass, schedule, team).
 
 **Choosing Team Beau or Team Parkeaux happens at the opening ceremony, not at registration**, to match the storyline (Chapter 3).
+
+## Picking a side (Team Beau or Team Parkeaux)
+
+Hackers choose their own team at the opening ceremony, but **neither team can go above 52% of all picks**, so one side can't run away with the game.
+
+**The rule**
+- A team is locked while its share of picks is **above 52%**.
+- While a side is locked, its half is dimmed with a lock icon and the message "Full for now". The open side is expanded and shows a banner calling for help: **"Beau needs help!"** or **"Parkeaux needs help!"**
+- A pick counts only once the server accepts it. The server checks the cap inside the same database transaction that records the pick, so two people tapping at once can't push a team over 52%. The client's lock state is only a preview.
+- Early on, a single pick swings the percentage a lot (the very first hacker puts one side at 100%). Picks will alternate until enough people have chosen. If that feels bad at the ceremony, add a grace period: don't enforce the cap until about 20 picks.
+- A pick is final once made.
+
+**Look and motion** (inspired by Fortnite's split-screen face-off art, not copied from it)
+- The screen is split down a diagonal seam that glows gold. Beau is a purple glow with gold sparks. Parkeaux is dark asphalt with faint gold road stripes.
+- **Hover (web) or tap (phone)** springs the chosen side open to **60%** of the screen. Its emblem grows and the other side shrinks and dims. The join button appears only on the open side.
+- **Web and big screens:** left and right halves. **Phone:** top and bottom halves, so the open side gets 60% of the height.
+- The live split ("Beau 47%, 53% Parkeaux") sits at the bottom as one bar.
+- After joining, a confirmation card pops in.
+- The crown and toll-barrier emblems are placeholders until the Beau and Parkeaux artwork is ready.
+- Designs: the "Pick your side" artboards on the style tile.
 
 ## Story features this adds (not in the architecture spec yet)
 
