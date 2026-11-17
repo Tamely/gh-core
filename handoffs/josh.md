@@ -6,7 +6,7 @@ _Last updated: 2026-11-16_
 **PR 1 series: client shell.** The SolidJS PWA at `apps/client/` and its Capacitor iOS/Android wrapper: offline shell, PWA, native plugins, store builds, OTA updates.
 
 ## Status
-Not started. The repo is empty; PR 1.1 is next. Design references are still to come and will set the Tailwind theme and shell layout (PR 1.2).
+Not started. PR 1.1 is next. The design direction is in [`docs/design.md`](../docs/design.md): the Allo font, round and bouncy iOS feel, Elysiu (light) / Abyssus (dark) themes, District colors, and a registration flow modeled on HackMIT's. PR 1.2 turns it into the Tailwind theme.
 
 ### PR plan
 | PR | Scope | Blocked on |
@@ -18,6 +18,7 @@ Not started. The repo is empty; PR 1.1 is next. Design references are still to c
 | 1.5 Scanner + push | `@capacitor-mlkit/barcode-scanning` (camera permissions), `@capacitor/push-notifications` (APNs key, Firebase `google-services.json`, secrets kept out of git) | ops: Apple Developer account, Firebase project |
 | 1.6 Store builds | fastlane `ios beta` (local Mac) and `android beta`, signing set up, TestFlight and Play Closed Testing live on physical devices | ops: store accounts, 12 testers |
 | 1.7 Deep links | Associated Domains / App Links for `app.geauxhack.org` (`/judge/:token`, `/auth/callback`, `/n/:id`) | infra: hosting the `.well-known` files |
+| 1.9 Registration UI | HackMIT-style application lifecycle: public timeline, multi-step application saved as drafts, status card, confirmation (RSVP). See `docs/design.md`. | auth: sign-in; backend: application API |
 | 1.8 OTA | `@capgo/capacitor-updater` self-hosted: signed bundles, `manifest.json` with minimum native version, update check on foreground, rollback via `notifyAppReady()`, CI publishing step. Built and tested against a local server first. | infra: CDN bucket for the production setup |
 
 ## Decisions
@@ -31,6 +32,10 @@ Not started. The repo is empty; PR 1.1 is next. Design references are still to c
 - **Google Play is a personal account**, so 12 testers have to be opted in for 14 days in a row. The 14-day clock must **start by 2026-12-15**.
 - **iOS builds happen on Josh's Mac** through fastlane.
 - **Hosting is decided later.** Until then, PR 1.1–1.6 and the local version of 1.8 don't depend on it.
+- **Font: Allo** (SIL Open Font License, self-hosted). It's cut down to a **50KB** Latin subset with weight 400–800, roundness fixed at 80 and optical size fixed at 24. Sizes were measured; see `docs/design.md`.
+- **Visual style:** HackUTD-level simplicity and motion. Style tile: https://claude.ai/artifact/LPhptxiLDtmHg42fyfagLa
+- **Animation uses CSS `linear()` spring easing only**, with no JavaScript animation library, to stay inside the 35KB budget. Everything respects `prefers-reduced-motion`.
+- **Registration copies HackMIT's flow structure only.** Their visuals, wording and code are not used.
 - **The web build never includes native plugins.** Every Capacitor plugin is imported on demand, only on native.
 
 ## Provides to others
@@ -52,6 +57,10 @@ Not started. The repo is empty; PR 1.1 is next. Design references are still to c
 | infra | Serve `sw.js` and `index.html` with `Cache-Control: no-cache`; hashed assets cached as `immutable` | Service worker updates propagate to users | when hosting exists |
 | infra | CDN bucket and URL for OTA bundles plus `manifest.json`; a CI secret allowed to upload to it | PR 1.8 production setup | before the January mock run |
 | backend | Response shapes for the schedule and the current user's profile (for the offline snapshot). Until they exist, the client uses bundled sample data in the same shape. | Swapping fixtures for real API calls after PR 1.2 | not blocking |
+| design / art | SVG illustrations of Beau and the six Vespers (plus simple versions for small sizes), District icons, the Elysiu/Abyssus portal key art, and the app icon | PR 1.2 visuals, PR 1.4 icon and splash | 2026-12-05 |
+| backend | Application API: draft, submit, status, decision, confirmation deadline, waitlist release | PR 1.9 | not blocking |
+| backend | **Storyline features not in the architecture spec:** picking Team Beau or Team Parkeaux, point QR codes and side quests (a signed points ledger, scannable offline, like entitlements), a live team leaderboard over WebSocket, and the ending reveal decided by final points | Main event-app features | needs an owner |
+| database | Tables for applications and their statuses, team alliance, and a points ledger. (These aren't in the schema ticket.) | PR 1.9 and the story features | needs an owner |
 | auth | Which secure-storage plugin is used for the native token, so PR 1.4 doesn't add a conflicting one | PR 1.4 | not blocking |
 
 ## Done for others
