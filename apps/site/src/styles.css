@@ -8,20 +8,87 @@ html {
   scroll-behavior: smooth;
 }
 
-/* The hero's line drawing sketches itself in. Paths use pathLength="1". */
+/* The hero's line drawing sketches itself in, piece by piece (delays are inline).
+   Paths use pathLength="1". */
 .sketch {
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
-  animation: sketch 2.6s var(--ease-out-expo) 0.15s forwards;
+  animation: sketch 1.6s var(--ease-out-expo) both;
 }
 @keyframes sketch {
   to {
     stroke-dashoffset: 0;
   }
 }
+
+/* Clouds drift across the whole sky. */
+.drift {
+  animation: drift 110s linear infinite;
+}
+@keyframes drift {
+  from {
+    transform: translateX(-160px);
+  }
+  to {
+    transform: translateX(calc(100vw + 40px));
+  }
+}
+
+/* Every 6.5s the crown falls into the pothole and the pothole flashes gold. */
+.crown-drop {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: crown-drop 6.5s 2s infinite;
+}
+@keyframes crown-drop {
+  0% {
+    transform: translateY(-420px);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  4% {
+    opacity: 1;
+  }
+  26% {
+    transform: translateY(30px) scale(0.7, 0.5);
+    opacity: 1;
+  }
+  30% {
+    transform: translateY(40px) scale(0.3, 0.1);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(40px) scale(0.3, 0.1);
+    opacity: 0;
+  }
+}
+.pothole-glow {
+  opacity: 0;
+  filter: blur(6px);
+  animation: pothole-glow 6.5s 2s infinite;
+}
+@keyframes pothole-glow {
+  0%,
+  25% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.85;
+  }
+  60%,
+  100% {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sketch {
     stroke-dashoffset: 0;
+  }
+  /* Without motion the crown just hovers over the pothole. */
+  .crown-drop {
+    opacity: 1;
+    transform: none;
   }
 }
 

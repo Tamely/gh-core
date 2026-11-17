@@ -1,51 +1,11 @@
 import { For } from "solid-js";
-import { APP_URL, APPLY_URL, SPONSOR_EMAIL, milestones } from "./content";
+import {
+  APP_URL,
+  APPLY_URL,
+  REGISTRATION_OPEN,
+  SPONSOR_EMAIL,
+} from "./content";
 import { CrownMark, Eyebrow, RollButton } from "./ui";
-
-/** Application timeline, laid out on a line (modeled on HackMIT's). */
-export function Timeline() {
-  return (
-    <section class="bg-paper text-ink">
-      <div class="mx-auto max-w-6xl px-6 py-[clamp(80px,12vw,150px)]">
-        <Eyebrow class="text-muted">How to get in</Eyebrow>
-        <h2 class="mt-4 text-[clamp(36px,5vw,64px)] leading-[0.95] font-extrabold tracking-[-0.04em]">
-          From application to opening ceremony
-        </h2>
-        <ol class="mt-14 grid gap-y-8 md:grid-cols-5 md:gap-x-6">
-          <For each={milestones}>
-            {(step, index) => (
-              <li class="relative grid grid-cols-[20px_1fr] gap-x-4 md:block">
-                <span
-                  aria-hidden="true"
-                  class={`relative z-[1] mt-1 block size-4 rounded-full md:mt-0 ${
-                    index() === milestones.length - 1
-                      ? "bg-gold"
-                      : "border-[3px] border-beau bg-paper"
-                  }`}
-                />
-                {/* The connecting line: down on phones, across on desktop. */}
-                <span
-                  aria-hidden="true"
-                  class={`absolute top-6 bottom-[-2rem] left-[7px] w-0.5 bg-beau/20 md:top-[7px] md:right-[-1.5rem] md:bottom-auto md:left-6 md:h-0.5 md:w-auto ${
-                    index() === milestones.length - 1 ? "hidden" : ""
-                  }`}
-                />
-                <div class="md:mt-5">
-                  <p class="text-lg leading-tight font-extrabold">
-                    {step.label}
-                  </p>
-                  <p class="mt-1 text-[15px] text-muted">
-                    {step.date ?? "To be announced"}
-                  </p>
-                </div>
-              </li>
-            )}
-          </For>
-        </ol>
-      </div>
-    </section>
-  );
-}
 
 const faqs: { q: string; a: string }[] = [
   {
@@ -73,7 +33,7 @@ const faqs: { q: string; a: string }[] = [
 export function Faq() {
   return (
     <section id="faq" class="bg-paper text-ink">
-      <div class="mx-auto grid max-w-6xl gap-10 px-6 pb-[clamp(80px,12vw,150px)] md:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]">
+      <div class="mx-auto grid max-w-6xl gap-10 px-6 py-[clamp(80px,12vw,150px)] md:grid-cols-[minmax(0,4fr)_minmax(0,8fr)]">
         <h2 class="text-[clamp(36px,5vw,64px)] leading-[0.95] font-extrabold tracking-[-0.04em]">
           Questions
         </h2>
@@ -145,8 +105,11 @@ export function Footer() {
           </p>
         </div>
         <div class="flex flex-wrap gap-x-8 gap-y-3 text-[15px] font-semibold text-ink-inverse/80">
-          <a href={APPLY_URL} class="no-underline hover:text-white">
-            Apply
+          <a
+            href={REGISTRATION_OPEN ? APPLY_URL : "#notify-email"}
+            class="no-underline hover:text-white"
+          >
+            {REGISTRATION_OPEN ? "Apply" : "Get notified"}
           </a>
           <a href={APP_URL} class="no-underline hover:text-white">
             Open the app

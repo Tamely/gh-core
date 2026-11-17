@@ -1,19 +1,27 @@
-import { For } from "solid-js";
-import { APPLY_URL, EVENT_DATES, VENUE } from "./content";
-import { CrownMark, stars } from "./ui";
+import { For, Show } from "solid-js";
+import {
+  APPLY_URL,
+  EVENT_DATES,
+  REGISTRATION_OPEN,
+  SPONSOR_EMAIL,
+  VENUE,
+} from "./content";
+import { NotifyForm } from "./Notify";
+import { CrownMark, RollButton, stars } from "./ui";
 
-const sky = stars(34, 7);
+const sky = stars(40, 7);
 
 /**
- * Kept deliberately simple, after HackUTD's hero: one line of context, one
- * heading, a thin line drawing along the bottom. The drawing is campus on
- * Nicholson Drive, with Beau's crown dropping into the pothole.
+ * Full-screen and simple, after HackUTD's hero: one line of context, one
+ * heading, and a line drawing of campus on Nicholson across the whole bottom
+ * edge. Every so often Beau's crown drops into the pothole and it flashes gold.
+ * While registration is closed, the only action is HackMIT's "notify me".
  */
 export function Hero() {
   return (
     <header
       id="top"
-      class="relative isolate overflow-hidden bg-abyss text-ink-inverse"
+      class="relative isolate flex h-svh min-h-[600px] flex-col overflow-hidden bg-abyss text-ink-inverse"
     >
       <For each={sky}>
         {(star) => (
@@ -21,7 +29,7 @@ export function Hero() {
             aria-hidden="true"
             class="star absolute -z-10 size-[3px] rounded-full bg-gold"
             style={{
-              top: `calc(${star.top} * 0.7)`,
+              top: `calc(${star.top} * 0.65)`,
               left: star.left,
               "animation-duration": star.duration,
               "animation-delay": star.delay,
@@ -29,8 +37,12 @@ export function Hero() {
           />
         )}
       </For>
+      {/* Clouds stay in the band above the heading so they never cross the text. */}
+      <Cloud class="top-[9%]" style={{ "animation-delay": "-12s" }} />
+      <Cloud class="top-[13%] scale-75" style={{ "animation-delay": "-48s" }} />
+      <Cloud class="top-[6%] scale-90" style={{ "animation-delay": "-80s" }} />
 
-      <nav class="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+      <nav class="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
         <a
           href="#top"
           class="flex items-center gap-2 text-ink-inverse no-underline"
@@ -38,40 +50,68 @@ export function Hero() {
           <CrownMark size={22} class="text-gold" />
           <span class="text-[17px] font-bold tracking-tight">geaux hack</span>
         </a>
-        <div class="flex items-center gap-8">
-          <div class="hidden items-center gap-7 text-[13px] font-semibold tracking-[0.08em] text-ink-inverse/75 uppercase md:flex">
-            <a href="#story" class="no-underline hover:text-white">
-              Story
-            </a>
-            <a href="#districts" class="no-underline hover:text-white">
-              Tracks
-            </a>
-            <a href="#faq" class="no-underline hover:text-white">
-              FAQ
-            </a>
-            <a href="#sponsor" class="no-underline hover:text-white">
-              Sponsor
+        {/* Section links only exist once the full page does. */}
+        <Show when={REGISTRATION_OPEN}>
+          <div class="flex items-center gap-8">
+            <div class="hidden items-center gap-7 text-[13px] font-semibold tracking-[0.08em] text-ink-inverse/75 uppercase md:flex">
+              <a href="#story" class="no-underline hover:text-white">
+                Story
+              </a>
+              <a href="#districts" class="no-underline hover:text-white">
+                Tracks
+              </a>
+              <a href="#faq" class="no-underline hover:text-white">
+                FAQ
+              </a>
+              <a href="#sponsor" class="no-underline hover:text-white">
+                Sponsor
+              </a>
+            </div>
+            <a
+              href={APPLY_URL}
+              class="press rounded-full bg-gold px-5 py-2 text-[13px] font-extrabold tracking-[0.06em] text-ink uppercase no-underline"
+            >
+              Apply
             </a>
           </div>
-          <a
-            href={APPLY_URL}
-            class="press rounded-full bg-gold px-5 py-2 text-[13px] font-extrabold tracking-[0.06em] text-ink uppercase no-underline"
-          >
-            Apply
-          </a>
-        </div>
+        </Show>
       </nav>
 
-      <div class="mx-auto flex max-w-4xl flex-col items-center px-6 pt-[14vh] text-center">
+      <div class="mx-auto flex w-full max-w-4xl flex-col items-center px-6 pt-[11vh] text-center">
         <p class="text-[15px] font-semibold text-ink-inverse/80 italic">
           WiCS Geaux Hack 2027 at LSU
         </p>
-        <h1 class="mt-3 text-[clamp(36px,5.6vw,64px)] leading-[1.08] font-medium tracking-[-0.02em]">
+        <h1 class="mt-3 text-[clamp(38px,6vw,72px)] leading-[1.05] font-medium tracking-[-0.025em]">
           Geaux beyond the known
         </h1>
         <p class="mt-4 text-[15px] text-ink-inverse/55">
           {EVENT_DATES ?? "Dates announced soon"} at {VENUE}
         </p>
+        <div class="mt-9 flex w-full flex-col items-center">
+          <Show
+            when={REGISTRATION_OPEN}
+            fallback={
+              <>
+                <p class="mb-4 text-[17px] font-semibold">
+                  Hackers, mentors and judges: get an email when registration
+                  opens.
+                </p>
+                <NotifyForm />
+                <p class="mt-6 text-[13px] text-ink-inverse/50">
+                  Interested in sponsoring?{" "}
+                  <a
+                    href={`mailto:${SPONSOR_EMAIL}`}
+                    class="text-ink-inverse/80 underline underline-offset-4 hover:text-white"
+                  >
+                    {SPONSOR_EMAIL}
+                  </a>
+                </p>
+              </>
+            }
+          >
+            <RollButton href={APPLY_URL} label="Apply to hack" tone="gold" />
+          </Show>
+        </div>
       </div>
 
       <Skyline />
@@ -79,88 +119,185 @@ export function Hero() {
   );
 }
 
-/** Thin white line art that draws itself in. Every stroke uses pathLength="1". */
-function Skyline() {
-  const line = "sketch fill-none stroke-ink-inverse/80";
+function Cloud(props: { class: string; style: Record<string, string> }) {
   return (
     <svg
-      viewBox="0 0 1200 300"
-      preserveAspectRatio="xMidYMax meet"
-      class="mx-auto mt-[8vh] block w-full max-w-6xl"
+      aria-hidden="true"
+      width="120"
+      height="48"
+      viewBox="0 0 120 48"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.4"
+      stroke-linecap="round"
+      class={`drift absolute left-0 -z-10 text-ink-inverse/45 ${props.class}`}
+      style={props.style}
+    >
+      <path d="M22 42h76a14 14 0 0 0-4-27 20 20 0 0 0-37-8 15 15 0 0 0-25 14 11 11 0 0 0-10 21z" />
+    </svg>
+  );
+}
+
+/**
+ * Campus along Nicholson, drawn edge to edge. Strokes use pathLength="1" so
+ * each piece can sketch itself in; the delays draw the road first, then the
+ * buildings outward from the pothole.
+ */
+function Skyline() {
+  const ink = "sketch fill-none stroke-ink-inverse/80";
+  const at = (x: number) => `translate(${x} 20)`;
+  const delay = (s: number) => ({ "animation-delay": `${s}s` });
+
+  // Shapes drawn at their own origin; placed below with translate().
+  const oakBig =
+    "M10 230v-34M0 202c-22 2-32-20-16-32-6-20 18-30 30-18 10-16 36-8 34 10 18 4 16 30-4 34-10 10-34 12-44 6z";
+  const oakSmall =
+    "M10 230v-26M2 208c-16 0-22-16-10-24-2-16 18-22 26-12 10-10 28-2 24 12 12 6 6 24-8 24-8 6-24 6-32 0z";
+  const tower =
+    "M0 230V72h40v158M0 72l20-34 20 34M20 38v-16M8 100h24v26H8zM12 230v-60h16v60";
+  const hall =
+    "M10 230V140h150v90M0 140l85-30 85 30M30 162h14M62 162h14M94 162h14M126 162h14M30 190h14M62 190h14M94 190h14M126 190h14M76 230v-26h18v26";
+  const pft =
+    "M0 230v-74h300v74M0 156l20-16h260l20 16M30 176h240M30 196h240M60 156v74M120 156v74M180 156v74M240 156v74";
+
+  return (
+    <svg
+      viewBox="0 0 1600 320"
+      preserveAspectRatio="xMidYMax slice"
+      class="absolute inset-x-0 bottom-0 -z-10 h-[38vh] max-h-[360px] min-h-[200px] w-full"
       stroke-width="1.4"
       stroke-linecap="round"
       stroke-linejoin="round"
       role="img"
-      aria-label="Line drawing of the LSU campus along Nicholson Drive, with a crown falling into a pothole"
+      aria-label="Line drawing of the LSU campus along Nicholson Drive. A crown falls into a pothole in the road."
     >
-      {/* Oaks on the left */}
+      {/* Road */}
       <path
         pathLength="1"
-        class={line}
-        d="M70 250v-34M60 222c-22 2-32-20-16-32-6-20 18-30 30-18 10-16 36-8 34 10 18 4 16 30-4 34-10 10-34 12-44 6z"
+        class={ink}
+        style={delay(0)}
+        d="M0 270h744M856 270h744M0 312h1600"
+      />
+      <path
+        class="fill-none stroke-ink-inverse/30"
+        stroke-dasharray="14 18"
+        d="M0 291h1600"
+      />
+
+      {/* Left of the pothole, drawn from the center outward */}
+      <path
+        pathLength="1"
+        class={ink}
+        style={delay(0.35)}
+        transform={at(612)}
+        d={oakSmall}
       />
       <path
         pathLength="1"
-        class={line}
-        d="M170 250v-26M162 228c-16 0-22-16-10-24-2-16 18-22 26-12 10-10 28-2 24 12 12 6 6 24-8 24-8 6-24 6-32 0z"
+        class={ink}
+        style={delay(0.5)}
+        transform={at(420)}
+        d={hall}
       />
-
-      {/* Memorial Tower */}
       <path
         pathLength="1"
-        class={line}
-        d="M268 250V92h40v158M268 92l20-34 20 34M288 58v-16M276 120h24v26h-24zM280 250v-60h16v60"
+        class={ink}
+        style={delay(0.65)}
+        transform={at(352)}
+        d={tower}
       />
-      <circle pathLength="1" class={line} cx="288" cy="108" r="7" />
-
-      {/* Classroom buildings with rows of windows */}
+      <circle
+        pathLength="1"
+        class={ink}
+        style={delay(0.65)}
+        cx="372"
+        cy="108"
+        r="7"
+      />
       <path
         pathLength="1"
-        class={line}
-        d="M340 250V160h150v90M330 160l85-30 85 30M360 182h14M392 182h14M424 182h14M456 182h14M360 210h14M392 210h14M424 210h14M456 210h14M406 250v-26h18v26"
+        class={ink}
+        style={delay(0.8)}
+        transform={at(262)}
+        d={oakSmall}
       />
-
-      {/* Crown falling into the pothole */}
-      <g class="float">
-        <path
-          pathLength="1"
-          class="sketch fill-none stroke-gold"
-          stroke-width="2"
-          d="M586 176h28M588 176l-3-18 9 7 6-12 6 12 9-7-3 18"
-        />
-      </g>
-
-      {/* PFT Hall: long and low */}
       <path
         pathLength="1"
-        class={line}
-        d="M700 250v-74h300v74M700 176l20-16h260l20 16M730 196h240M730 216h240M760 176v74M820 176v74M880 176v74M940 176v74"
+        class={ink}
+        style={delay(0.9)}
+        transform={at(70)}
+        d={hall}
       />
-
-      {/* Oak on the right */}
       <path
         pathLength="1"
-        class={line}
-        d="M1080 250v-38M1070 216c-24 2-36-22-18-36-6-22 20-32 34-20 12-18 40-8 38 12 20 6 16 34-6 38-12 10-38 12-48 6z"
+        class={ink}
+        style={delay(1)}
+        transform={at(10)}
+        d={oakBig}
       />
 
-      {/* Nicholson Drive and the pothole */}
-      <path pathLength="1" class={line} d="M0 250h548M652 250h548M0 290h1200" />
+      {/* Right of the pothole */}
       <path
         pathLength="1"
-        class="fill-none stroke-ink-inverse/35"
-        stroke-dasharray="0.012 0.02"
-        d="M0 270h1200"
+        class={ink}
+        style={delay(0.45)}
+        transform={at(890)}
+        d={pft}
+      />
+      <path
+        pathLength="1"
+        class={ink}
+        style={delay(0.7)}
+        transform={at(1226)}
+        d={oakBig}
+      />
+      <path
+        pathLength="1"
+        class={ink}
+        style={delay(0.85)}
+        transform={at(1290)}
+        d={hall}
+      />
+      <path
+        pathLength="1"
+        class={ink}
+        style={delay(1)}
+        transform={at(1490)}
+        d={oakSmall}
+      />
+      <path
+        pathLength="1"
+        class={ink}
+        style={delay(1.05)}
+        transform={at(1550)}
+        d={oakBig}
+      />
+
+      {/* The pothole, its glow when the crown lands, and the falling crown */}
+      <ellipse
+        class="pothole-glow fill-gold"
+        cx="800"
+        cy="272"
+        rx="56"
+        ry="9"
       />
       <ellipse
         pathLength="1"
         class="sketch fill-none stroke-gold"
+        style={delay(1.1)}
         stroke-width="1.8"
-        cx="600"
-        cy="252"
-        rx="52"
+        cx="800"
+        cy="272"
+        rx="56"
         ry="9"
       />
+      <g class="crown-drop">
+        <path
+          class="fill-none stroke-gold"
+          stroke-width="2"
+          d="M786 236h28M788 236l-3-18 9 7 6-12 6 12 9-7-3 18"
+        />
+      </g>
     </svg>
   );
 }
