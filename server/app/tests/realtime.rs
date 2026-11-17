@@ -462,12 +462,231 @@ async fn publish_fails_fast_while_redis_is_unreachable() {
     let started = std::time::Instant::now();
     let result = tokio::time::timeout(
         Duration::from_secs(5),
-        state.events.publish(&Topic::parse("room:1").unwrap(), "t", &json!(null)),
+        state
+            .events
+            .publish(&Topic::parse("room:1").unwrap(), "t", &json!(null)),
     )
     .await;
     redis.container.unpause().await.unwrap();
 
     let result = result.expect("publish hung while Redis was unreachable");
     assert!(result.is_err());
-    assert!(started.elapsed() < Duration::from_millis(1500), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_millis(1500),
+        "{:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test]
+async fn dropped_connection_releases_its_topics() {
+    let redis = start_redis().await;
+    let (addr, state) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    for topic in ["room:1", "team:1", "mentor-tag:Rust", "user:1"] {
+        client.subscribe(topic).await;
+    }
+    assert_eq!(state.hub.topic_count(), 4);
+
+    // The socket goes away without a WebSocket close frame, like a phone
+    // losing signal.
+    drop(client);
+    assert!(
+        eventually(Duration::from_secs(5), || async {
+            state.hub.topic_count() == 0
+        })
+        .await,
+        "{} topics still held",
+        state.hub.topic_count()
+    );
+}
+
+#[tokio::test]
+async fn connections_coming_and_going_leave_nothing_behind() {
+    let redis = start_redis().await;
+    let (addr, state) = instance(&redis).await;
+    let mut keeper = Client::connect(&addr).await;
+    keeper.subscribe("room:shared").await;
+
+    for i in 0..50 {
+        let mut client = Client::connect(&addr).await;
+        client.subscribe("room:shared").await;
+        client.subscribe(&format!("user:{i}")).await;
+        if i % 2 == 0 {
+            client.ws.close(None).await.unwrap();
+        }
+        // Odd ones just drop the socket.
+    }
+
+    // Only the long-lived client's topic is left, and it still works.
+    assert!(
+        eventually(Duration::from_secs(5), || async {
+            state.hub.topic_count() == 1
+        })
+        .await
+    );
+    publish(&state, "room:shared", "t", json!("still here")).await;
+    assert_eq!(keeper.next_json().await["payload"], "still here");
+}
+
+#[tokio::test]
+async fn websocket_outlives_the_http_request_timeout() {
+    let redis = start_redis().await;
+    let (addr, state) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    client.subscribe("room:1").await;
+
+    tokio::time::sleep(gh_server::REQUEST_TIMEOUT + Duration::from_millis(500)).await;
+    publish(&state, "room:1", "t", json!("later")).await;
+    assert_eq!(client.next_json().await["payload"], "later");
+}
+
+#[tokio::test]
+async fn payloads_pass_through_unchanged() {
+    let redis = start_redis().await;
+    let (addr, state) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    client.subscribe("room:1").await;
+
+    let payloads = [
+        json!(null),
+        json!(0),
+        json!(-1.5e300),
+        json!("emoji 🎉, accents é, quotes \" and \\ backslash, newline\n, tab\t"),
+        json!({"nested": {"deep": [1, [2, [3]]]}, "empty": {}, "list": []}),
+        json!("x".repeat(64 * 1024)), // outgoing events have no 4KB limit
+    ];
+    for payload in &payloads {
+        publish(&state, "room:1", "t", payload.clone()).await;
+    }
+    for payload in &payloads {
+        assert_eq!(&client.next_json().await["payload"], payload);
+    }
+}
+
+#[tokio::test]
+async fn mentor_tags_with_symbols_round_trip_through_redis() {
+    let redis = start_redis().await;
+    let (addr, state) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    for tag in [
+        "mentor-tag:C++",
+        "mentor-tag:C#",
+        "mentor-tag:node.js",
+        "mentor-tag:Vulkan_1-3",
+    ] {
+        client.subscribe(tag).await;
+        publish(&state, tag, "ticket.opened", json!(tag)).await;
+        let event = client.next_json().await;
+        assert_eq!(
+            (event["topic"].as_str(), event["payload"].as_str()),
+            (Some(tag), Some(tag))
+        );
+    }
+}
+
+#[tokio::test]
+async fn unsubscribing_from_something_never_subscribed_is_acknowledged() {
+    let redis = start_redis().await;
+    let (addr, _) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    let reply = client.command("unsubscribe", "room:never").await;
+    assert_eq!(
+        reply,
+        json!({"type": "unsubscribed", "topic": "room:never"})
+    );
+}
+
+#[tokio::test]
+async fn extra_fields_are_ignored_but_ops_are_case_sensitive() {
+    let redis = start_redis().await;
+    let (addr, _) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+
+    client
+        .send_text(r#"{"op":"subscribe","topic":"room:1","client_version":"1.2.0"}"#)
+        .await;
+    assert_eq!(client.next_json().await["type"], "subscribed");
+
+    client
+        .send_text(r#"{"op":"Subscribe","topic":"room:2"}"#)
+        .await;
+    assert_eq!(client.next_json().await["type"], "error");
+
+    client.send_text(r#"{"op":"subscribe","topic":42}"#).await;
+    assert_eq!(client.next_json().await["type"], "error");
+
+    client.send_text("[]").await;
+    assert_eq!(client.next_json().await["type"], "error");
+}
+
+#[tokio::test]
+async fn plain_http_request_to_the_websocket_route_is_a_client_error() {
+    let redis = start_redis().await;
+    let (addr, _) = instance(&redis).await;
+    let status = reqwest::get(format!("http://{addr}/api/v1/ws"))
+        .await
+        .unwrap()
+        .status();
+    assert!(status.is_client_error(), "{status}");
+}
+
+#[tokio::test]
+async fn client_ping_gets_a_pong() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+    let redis = start_redis().await;
+    let (addr, _) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    client
+        .ws
+        .send(Message::Ping(b"are you there".to_vec().into()))
+        .await
+        .unwrap();
+    let reply = tokio::time::timeout(RECV_TIMEOUT, client.ws.next())
+        .await
+        .unwrap();
+    assert!(
+        matches!(reply, Some(Ok(Message::Pong(ref data))) if &data[..] == b"are you there"),
+        "{reply:?}"
+    );
+}
+
+#[tokio::test]
+async fn client_moving_to_another_instance_keeps_counting_seq() {
+    // The rolling-deploy path: instance A restarts, the client reconnects to
+    // B, and `seq` continues so it can tell whether it missed anything.
+    let redis = start_redis().await;
+    let (addr_a, state_a) = instance(&redis).await;
+    let (addr_b, state_b) = instance(&redis).await;
+
+    let mut client = Client::connect(&addr_a).await;
+    client.subscribe("room:1").await;
+    publish(&state_a, "room:1", "t", json!("before")).await;
+    assert_eq!(client.next_json().await["seq"], 1);
+
+    state_a.shutdown.cancel();
+    assert_eq!(client.read_until_close().await.1, Some(1012));
+
+    let mut client = Client::connect(&addr_b).await;
+    client.subscribe("room:1").await;
+    publish(&state_b, "room:1", "t", json!("after")).await;
+    let event = client.next_json().await;
+    assert_eq!(
+        (event["seq"].clone(), event["payload"].clone()),
+        (json!(2), json!("after"))
+    );
+}
+
+#[tokio::test]
+async fn seq_survives_a_server_restart() {
+    let redis = start_redis().await;
+    {
+        let (_, old) = instance(&redis).await;
+        publish(&old, "team:1", "t", json!(null)).await;
+        publish(&old, "team:1", "t", json!(null)).await;
+        old.shutdown.cancel();
+    }
+    let (_, new) = instance(&redis).await;
+    assert_eq!(publish(&new, "team:1", "t", json!(null)).await, 3);
 }
