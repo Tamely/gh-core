@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* Design tokens from docs/design.md. The full theme (Allo font, motion, components) lands in PR 1.2. */
+@theme {
+  --color-paper: #fdf7ec;
+  --color-abyss: #0e0b14;
+  --color-ink: #1a1523;
+  --color-ink-inverse: #f5f0fa;
+  --color-muted: #5c5566;
+  --color-beau: #461d7c;
+  --color-beau-glow: #b48cf0;
+  --color-gold: #fdd023;
+}

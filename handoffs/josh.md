@@ -1,17 +1,17 @@
 # Josh: handoff
 
-_Last updated: 2026-11-16_
+_Last updated: 2026-11-17_
 
 ## Owns
 **PR 1 series: client shell.** The SolidJS PWA at `apps/client/` and its Capacitor iOS/Android wrapper: offline shell, PWA, native plugins, store builds, OTA updates.
 
 ## Status
-Not started. PR 1.1 is next. The design direction is in [`docs/design.md`](../docs/design.md): the Allo font, round and bouncy iOS feel, Elysiu (light) / Abyssus (dark) themes, District colors, and a registration flow modeled on HackMIT's. PR 1.2 turns it into the Tailwind theme.
+**PR 1.1 (scaffold)** is on branch `pr-1.1-scaffold`, not merged yet. Locally, lint, formatting, type-check, tests, build and the bundle budget all pass, and the initial shell is 6.16KB gzipped (18% of budget). CI hasn't run on GitHub yet. PR 1.2 is next. The design direction is in [`docs/design.md`](../docs/design.md): the Allo font, round and bouncy iOS feel, Elysiu (light) / Abyssus (dark) themes, District colors, and a registration flow modeled on HackMIT's. PR 1.2 turns it into the Tailwind theme.
 
 ### PR plan
 | PR | Scope | Blocked on |
 |---|---|---|
-| 1.1 Scaffold | pnpm workspace, `apps/client` (SolidJS, Vite, strict TypeScript, Tailwind v4), lint/format, CI (lint, type-check, test, build), `size-limit` budget: **entry JS + CSS under 35KB gzipped** | none |
+| 1.1 Scaffold | pnpm workspace, `apps/client` (SolidJS, Vite, strict TypeScript, Tailwind v4), lint/format, CI (lint, type-check, test, build), bundle budget: **initial shell JS + CSS under 35KB gzipped** | none (in review) |
 | 1.2 App shell | Small custom router (measured against `@solidjs/router`), navigation, schedule from bundled sample data, storage interface (IndexedDB on web, `localStorage` snapshot for the first render), `shell:rendered` performance mark, design tokens | design references |
 | 1.3 PWA | Workbox service worker (`vite-plugin-pwa`, `injectManifest`), manifest and maskable icons, offline fallback, Lighthouse CI (Performance ≥ 95, Accessibility and Best Practices = 100), installability check | none |
 | 1.4 Capacitor | iOS and Android projects, `com.geauxhack.app`, icons and splash, native SQLite storage backend, plugins loaded on demand (only on native), haptics, offline cold-start measurement on physical devices (under 100ms, Airplane Mode) | none |
@@ -36,6 +36,12 @@ Not started. PR 1.1 is next. The design direction is in [`docs/design.md`](../do
 - **Visual style:** HackUTD-level simplicity and motion. Style tile: https://claude.ai/artifact/LPhptxiLDtmHg42fyfagLa
 - **Animation uses CSS `linear()` spring easing only**, with no JavaScript animation library, to stay inside the 35KB budget. Everything respects `prefers-reduced-motion`.
 - **Registration copies HackMIT's flow structure only.** Their visuals, wording and code are not used.
+- **Toolchain (PR 1.1):** Node 24, pnpm 11.18, Vite 8, Tailwind 4.3, ESLint 10, Prettier 3, Vitest 5.
+  - **Solid 1.9, not 2.0.** Solid 2.0.0 came out on 2026-11-17 and `vite-plugin-solid` only supports it in a pre-release. Revisit once the plugin's 3.0 is stable.
+  - **TypeScript 6.0.3, not 7.** `typescript-eslint` supports TypeScript below 6.1 only.
+  - **pnpm's minimum release age stays on.** Pin to versions at least a day old rather than adding exceptions to `pnpm-workspace.yaml`. That's why `typescript-eslint` is 8.72.2.
+- **Bundle budget check:** `apps/client/scripts/check-budget.mjs` reads Vite's build manifest and gzips the entry chunk, every chunk it imports statically, and their CSS. Lazy `import()` chunks aren't counted. Used instead of `size-limit` because a filename glob can't tell entry chunks from lazy ones.
+- **Commit hook turns on automatically:** `pnpm install` runs `prepare`, which sets `core.hooksPath` to `.githooks`.
 - **The web build never includes native plugins.** Every Capacitor plugin is imported on demand, only on native.
 
 ## Provides to others

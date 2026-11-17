@@ -1,0 +1,26 @@
+{
+  "name": "@gh-core/client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "budget": "node scripts/check-budget.mjs"
+  },
+  "dependencies": {
+    "solid-js": "1.9.19"
+  },
+  "devDependencies": {
+    "@solidjs/testing-library": "0.8.10",
+    "@tailwindcss/vite": "4.3.5",
+    "@types/node": "24.19.2",
+    "jsdom": "31.0.1",
+    "tailwindcss": "4.3.5",
+    "vite": "8.3.8",
+    "vite-plugin-solid": "2.11.16",
+    "vitest": "5.1.0"
+  }
+}
