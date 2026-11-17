@@ -19,13 +19,25 @@ const BUCKETS: &[f64] = &[
     5.0, 10.0,
 ];
 
-/// Installs the global recorder. Call once, before anything records.
+/// Installs the global recorder. Call once, inside the Tokio runtime, before
+/// anything records.
 pub fn install() -> PrometheusHandle {
     let handle = PrometheusBuilder::new()
         .set_buckets_for_metric(Matcher::Suffix("_seconds".into()), BUCKETS)
         .expect("buckets are valid")
         .install_recorder()
         .expect("metrics recorder installs once");
+
+    // Histograms keep every raw sample until upkeep folds them into buckets.
+    // Without this, memory grows with every event until someone scrapes.
+    let upkeep = handle.clone();
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(std::time::Duration::from_secs(5));
+        loop {
+            every.tick().await;
+            upkeep.run_upkeep();
+        }
+    });
 
     // Register every series at zero so dashboards and alerts see them before
     // the first event happens.
