@@ -18,6 +18,7 @@ use axum::{
     middleware,
     response::Response,
     routing::get,
+    serve::ListenerExt,
 };
 use sqlx::PgPool;
 use tokio::net::TcpListener;
@@ -137,6 +138,13 @@ pub async fn serve(
             tokio::time::sleep(delay).await;
         }
     };
+    // Without TCP_NODELAY, a second small WebSocket message to the same client
+    // can wait up to 40ms for the client's delayed ACK.
+    let listener = listener.tap_io(|tcp| {
+        if let Err(e) = tcp.set_nodelay(true) {
+            tracing::warn!("can't set TCP_NODELAY: {e}");
+        }
+    });
     let server = axum::serve(listener, app).with_graceful_shutdown(stop_accepting);
 
     tokio::select! {
