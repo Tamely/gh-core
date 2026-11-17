@@ -43,8 +43,11 @@ use crate::{AppState, auth::Identity, events::now_us, hub::Frame, topic::Topic};
 
 pub const MAX_MESSAGE_BYTES: usize = 4 * 1024;
 pub const MAX_SUBSCRIPTIONS: usize = 50;
-/// Messages waiting to be written to one client.
-pub const SEND_QUEUE: usize = 64;
+/// Messages waiting to be written to one client. Queued events share their
+/// bytes with every other client's queue, so a full queue costs about 20KB.
+/// It has to absorb a burst (e.g. a room queue rebalanced at once) for a
+/// client that is reading normally.
+pub const SEND_QUEUE: usize = 512;
 /// Queue length at which a client is considered behind and gets `resync`.
 const BEHIND_AT: usize = SEND_QUEUE / 2;
 /// Unanswered pings before the connection is dropped.

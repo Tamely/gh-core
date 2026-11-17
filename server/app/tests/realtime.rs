@@ -431,3 +431,43 @@ async fn readyz_follows_redis() {
         .await
     );
 }
+
+#[tokio::test]
+async fn burst_of_events_arrives_without_resync() {
+    // Bulk operations (e.g. rebalancing a room queue) publish many events at
+    // once. Up to a full send queue's worth must arrive, in order, without a
+    // resync, for a client that reads normally.
+    const BURST: u64 = ws::SEND_QUEUE as u64;
+    let redis = start_redis().await;
+    let (addr, state) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    client.subscribe("room:bulk").await;
+
+    let topic = Topic::parse("room:bulk").unwrap();
+    let publishes = (0..BURST).map(|_| state.events.publish(&topic, "t", &json!(null)));
+    futures_util::future::join_all(publishes).await;
+
+    for expected in 1..=BURST {
+        let event = client.next_json().await;
+        assert_eq!(event["seq"], expected, "got {event}");
+    }
+}
+
+#[tokio::test]
+async fn publish_fails_fast_while_redis_is_unreachable() {
+    let redis = start_redis().await;
+    let (_, state) = instance(&redis).await;
+    redis.container.pause().await.unwrap();
+
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        state.events.publish(&Topic::parse("room:1").unwrap(), "t", &json!(null)),
+    )
+    .await;
+    redis.container.unpause().await.unwrap();
+
+    let result = result.expect("publish hung while Redis was unreachable");
+    assert!(result.is_err());
+    assert!(started.elapsed() < Duration::from_millis(1500), "{:?}", started.elapsed());
+}

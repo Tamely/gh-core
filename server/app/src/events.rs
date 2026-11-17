@@ -103,6 +103,15 @@ fn redis_config(url: &str) -> Result<Builder, Error> {
     let mut builder = Builder::from_config(Config::from_url(url)?);
     builder
         .with_connection_config(|c| c.connection_timeout = Duration::from_secs(2))
+        .with_performance_config(|p| {
+            // The default is no timeout, so a publish during a Redis outage
+            // would hang until the 3s request timeout ends the whole request.
+            p.default_command_timeout = Duration::from_secs(1);
+            // Messages from Redis wait here until the forwarding task takes
+            // them. The default of 32 turned any burst of events into a
+            // resync for every client.
+            p.broadcast_channel_capacity = 8192;
+        })
         // Retry forever: 100ms, 200ms, 400ms ... capped at 10s.
         .set_policy(ReconnectPolicy::new_exponential(0, 100, 10_000, 2));
     Ok(builder)

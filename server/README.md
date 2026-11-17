@@ -86,7 +86,7 @@ forwards it to its own clients, so it doesn't matter which instance a client
 is on. A Lua script bumps `gh:seq:{topic}` and publishes in one step.
 
 Limits: messages up to 4KB, 50 subscriptions per connection, a ping every 25s
-(2 missed pongs disconnect). Each connection has a 64-message send queue: at
+(2 missed pongs disconnect). Each connection has a 512-message send queue: at
 half full the client gets `resync`, when full it's closed with 1013. A slow
 client never delays anyone else. After a Redis reconnect every client gets
 `resync`, because events published during the outage are lost.
