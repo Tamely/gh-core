@@ -402,16 +402,9 @@ async fn subscriber_reconnects_to_redis_and_clients_resync() {
     let resync = client.next_json().await;
     assert_eq!(resync, json!({"type": "resync", "topic": "room:1"}));
 
-    // Events flow again once it has re-subscribed.
-    let delivered = eventually(Duration::from_secs(10), || {
-        let state = state.clone();
-        async move {
-            publish(&state, "room:1", "t", json!("after reconnect")).await;
-            true
-        }
-    })
-    .await;
-    assert!(delivered);
+    // `resync` is only sent once the subscription is back, so an event
+    // published right after it must arrive.
+    publish(&state, "room:1", "t", json!("after reconnect")).await;
     let event = client.next_json().await;
     assert_eq!(event["payload"], "after reconnect");
 }

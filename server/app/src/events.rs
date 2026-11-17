@@ -23,6 +23,7 @@ use crate::{
 };
 
 const CHANNEL_PREFIX: &str = "gh:events:";
+const PATTERN: &str = "gh:events:*";
 const SEQ_PREFIX: &str = "gh:seq:";
 
 /// Bumps the topic's counter and publishes in one atomic step. `seq` is
@@ -122,9 +123,7 @@ pub async fn connect(url: &str, hub: Arc<Hub>) -> Result<(Events, SubscriberClie
 
     let subscriber = builder.build_subscriber_client()?;
     subscriber.init().await?;
-    // Re-subscribes automatically after every reconnect.
-    subscriber.manage_subscriptions();
-    subscriber.psubscribe(format!("{CHANNEL_PREFIX}*")).await?;
+    subscriber.psubscribe(PATTERN).await?;
     gauge!("redis_connected").set(1.0);
 
     spawn_forwarding(&subscriber, hub);
@@ -168,9 +167,17 @@ fn spawn_forwarding(subscriber: &SubscriberClient, hub: Arc<Hub>) {
         }
     });
     let mut reconnects = subscriber.reconnect_rx();
+    let subscriber = subscriber.clone();
     tokio::spawn(async move {
         while reconnects.recv().await.is_ok() {
             counter!("redis_reconnects_total").increment(1);
+            // Re-subscribe before telling clients to resync. Otherwise a
+            // client could reload, then miss events published before the
+            // subscription is back.
+            while let Err(error) = subscriber.psubscribe(PATTERN).await {
+                tracing::warn!(%error, "re-subscribing to Redis failed, retrying");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
             gauge!("redis_connected").set(1.0);
             if let Some(since) = down_since.lock().unwrap().take() {
                 histogram!("redis_outage_seconds").record(since.elapsed());
