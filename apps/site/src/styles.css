@@ -1,0 +1,154 @@
+@import "tailwindcss";
+@import "@gh-core/brand/theme.css";
+
+/* The landing page sets its own section colors, so it doesn't follow the
+   system theme the way the app does: the hero and districts are always
+   Abyssus (dark), the story and timeline always Elysiu (light). */
+html {
+  scroll-behavior: smooth;
+}
+
+/* The hero's line drawing sketches itself in, piece by piece (delays are inline).
+   Paths use pathLength="1". */
+.sketch {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: sketch 1.6s var(--ease-out-expo) both;
+}
+@keyframes sketch {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Clouds drift across the whole sky. */
+.drift {
+  animation: drift 110s linear infinite;
+}
+@keyframes drift {
+  from {
+    transform: translateX(-160px);
+  }
+  to {
+    transform: translateX(calc(100vw + 40px));
+  }
+}
+
+/* Once the drawing is in, the crown drops in from above and falls through the
+   pothole, then again every 4 seconds. The fall takes the first ~1.3s of each
+   cycle; the crown is hidden the rest of the time, so it's never shown sitting
+   still (`both` also keeps it hidden during the start delay). The pothole
+   flashes each time it goes through and glows softly in between. */
+.crown-drop {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: crown-drop 4s 1.8s infinite both;
+}
+@keyframes crown-drop {
+  0% {
+    transform: translateY(-420px) rotate(0deg);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+  2% {
+    opacity: 1;
+  }
+  25% {
+    transform: translateY(30px) rotate(-8deg) scale(0.75, 0.6);
+    opacity: 1;
+  }
+  32%,
+  100% {
+    transform: translateY(40px) rotate(-8deg) scale(0.3, 0.1);
+    opacity: 0;
+  }
+}
+.pothole-glow {
+  opacity: 0.2;
+  filter: blur(6px);
+  animation: pothole-flash 4s 1.8s infinite both;
+}
+@keyframes pothole-flash {
+  0%,
+  24% {
+    opacity: 0.2;
+  }
+  29% {
+    opacity: 0.9;
+  }
+  55%,
+  100% {
+    opacity: 0.2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sketch {
+    stroke-dashoffset: 0;
+  }
+  /* Without motion, the crown hovers just above the glowing pothole. */
+  .crown-drop {
+    opacity: 1;
+    transform: none;
+  }
+  .pothole-glow {
+    opacity: 0.25;
+  }
+}
+
+.rise {
+  animation: rise 0.9s var(--ease-out-expo) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+/* Beau vs. Parkeaux split: the hovered side springs open to 60%. */
+.split-panel {
+  transition:
+    clip-path 0.75s cubic-bezier(0.34, 1.3, 0.64, 1),
+    filter 0.5s var(--ease-out-expo);
+}
+.split-slot {
+  transition:
+    width 0.75s cubic-bezier(0.34, 1.3, 0.64, 1),
+    left 0.75s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+.split-hero {
+  transition: transform 0.75s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+/* District rows fill with their color on hover. */
+.district {
+  transition:
+    background-color 0.35s var(--ease-out-expo),
+    color 0.35s var(--ease-out-expo);
+}
+.district .watermark {
+  transition:
+    transform 0.6s var(--ease-overshoot),
+    opacity 0.35s var(--ease-out-expo);
+  transform: translateX(40px) rotate(-8deg);
+  opacity: 0;
+}
+.district:hover .watermark,
+.district:focus-within .watermark {
+  transform: translateX(0) rotate(0);
+  opacity: 0.22;
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details[open] .faq-plus {
+  transform: rotate(45deg);
+}
+.faq-plus {
+  transition: transform 0.4s var(--ease-overshoot);
+}

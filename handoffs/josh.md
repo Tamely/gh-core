@@ -6,11 +6,19 @@ _Last updated: 2026-11-17_
 **PR 1 series: client shell.** The SolidJS PWA at `apps/client/` and its Capacitor iOS/Android wrapper: offline shell, PWA, native plugins, store builds, OTA updates.
 
 ## Status
-- **PR 1.1 (scaffold):** pushed on branch `pr-1.1-scaffold`. The draft PR isn't open yet because the built-in browser isn't signed in to GitHub, so CI hasn't run there.
-- **PR 1.2 (app shell):** on branch `pr-1.2-app-shell`, built on top of 1.1 and not committed yet.
-  - Done: theme from the style tile, the Allo font, the custom router, storage, five glass tabs, and Home and Schedule from sample data.
-  - All checks pass locally (16 tests). The initial shell is 13.17KB gzipped, 38% of the budget.
-  - Checked in the browser at phone size, in both themes. The design direction is in [`docs/design.md`](../docs/design.md): the Allo font, round and bouncy iOS feel, Elysiu (light) / Abyssus (dark) themes, District colors, and a registration flow modeled on HackMIT's. PR 1.2 turns it into the Tailwind theme.
+Three stacked draft PRs; merge them in order:
+
+- **PR 1.1 (scaffold):** https://github.com/Tamely/gh-core/pull/1, targeting `main`.
+- **PR 1.2 (app shell):** https://github.com/Tamely/gh-core/pull/2, targeting `pr-1.1-scaffold`.
+  - Contents: theme, Allo, the custom router, storage, five glass tabs, and Home and Schedule from sample data.
+  - Home and Schedule were reworked away from stacked cards: the countdown is type on the page, Up next is a timeline, and Schedule is a divided list with sticky day headers.
+  - All checks pass (16 tests). The initial shell is 14.09KB gzipped.
+- **Landing page:** https://github.com/Tamely/gh-core/pull/3, targeting `pr-1.2-app-shell`.
+  - New `apps/site`, the public site for `geauxhack.com`.
+  - Until registration opens it's one screen, like HackMIT's: a full-screen hero (as simple as HackUTD's, with the crown dropping into the pothole every 4s), a notify-me field and a sponsor line.
+  - The story, Beau vs. Parkeaux split, District rows, FAQ and sponsor band appear when `REGISTRATION_OPEN` is true. No cards.
+  - New `packages/brand` holds the theme CSS shared by the app and the site.
+- **Design:** [`docs/design.md`](../docs/design.md). The style canvas (link under Decisions) now matches the code, with Home, Schedule and the landing hero.
 
 ### PR plan
 | PR | Scope | Blocked on |
@@ -21,15 +29,16 @@ _Last updated: 2026-11-17_
 | 1.4 Capacitor | iOS and Android projects, `com.geauxhack.app`, icons and splash, native SQLite storage backend, plugins loaded on demand (only on native), haptics, offline cold-start measurement on physical devices (under 100ms, Airplane Mode) | none |
 | 1.5 Scanner + push | `@capacitor-mlkit/barcode-scanning` (camera permissions), `@capacitor/push-notifications` (APNs key, Firebase `google-services.json`, secrets kept out of git) | ops: Apple Developer account, Firebase project |
 | 1.6 Store builds | fastlane `ios beta` (local Mac) and `android beta`, signing set up, TestFlight and Play Closed Testing live on physical devices | ops: store accounts, 12 testers |
-| 1.7 Deep links | Associated Domains / App Links for `app.geauxhack.org` (`/judge/:token`, `/auth/callback`, `/n/:id`) | infra: hosting the `.well-known` files |
+| 1.7 Deep links | Associated Domains / App Links for `app.geauxhack.com` (`/judge/:token`, `/auth/callback`, `/n/:id`) | infra: hosting the `.well-known` files |
 | 1.9 Registration UI | HackMIT-style application lifecycle: public timeline, multi-step application saved as drafts, status card, confirmation (RSVP). See `docs/design.md`. | auth: sign-in; backend: application API |
+| Landing page | `apps/site` for `geauxhack.com`, sharing `packages/brand` with the app | infra: hosting for `geauxhack.com`; ops: real dates and a sponsor email |
 | 1.8 OTA | `@capgo/capacitor-updater` self-hosted: signed bundles, `manifest.json` with minimum native version, update check on foreground, rollback via `notifyAppReady()`, CI publishing step. Built and tested against a local server first. | infra: CDN bucket for the production setup |
 
 ## Decisions
 - **SolidJS**, chosen over Preact for the smallest runtime and no virtual DOM.
 - **Capacitor: latest stable major.** Not 6: its Android target SDK is below Google Play's current requirement.
 - **App ID / bundle ID: `com.geauxhack.app`.** It can't be changed after the first store upload.
-- **Production domain: `app.geauxhack.org`.**
+- **Production domain: `app.geauxhack.com`.**
 - **Router: custom, in `apps/client/src/router.tsx`.** Measured 2026-11-17 by building the same three-route test app three ways (gzip level 9):
 
   | Variant | Bundle | Router's cost |
@@ -71,13 +80,16 @@ _Last updated: 2026-11-17_
 | ops | Google Play Console personal account (identity verified) and a Play app record for `com.geauxhack.app` | PR 1.6 | 2026-12-01 |
 | ops | **12 or more testers** with Google account emails who will stay opted in to Closed Testing for 14 days in a row | Google Play production access; the clock must start by 12-15 | 2026-12-10 |
 | ops | Firebase project with an Android app `com.geauxhack.app`; APNs auth key (.p8) uploaded to Firebase | PR 1.5 push | 2026-12-05 |
-| ops | Privacy policy text, to be published at `https://app.geauxhack.org/privacy` | Both stores require a privacy policy URL | 2026-12-08 |
-| infra | Host the PWA at `app.geauxhack.org`, with `/api/*` and `/api/v1/ws` routed to the Rust server on the **same origin** | Production PWA; same-origin cookies for auth | before the January mock run |
+| ops | Privacy policy text, to be published at `https://app.geauxhack.com/privacy` | Both stores require a privacy policy URL | 2026-12-08 |
+| infra | Host the PWA at `app.geauxhack.com`, with `/api/*` and `/api/v1/ws` routed to the Rust server on the **same origin** | Production PWA; same-origin cookies for auth | before the January mock run |
 | infra | Serve `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json` with content type `application/json` and no redirects. Josh's agent supplies the file contents. | PR 1.7 deep links | when hosting exists |
 | infra | Serve `sw.js` and `index.html` with `Cache-Control: no-cache`; hashed assets cached as `immutable` | Service worker updates propagate to users | when hosting exists |
 | infra | CDN bucket and URL for OTA bundles plus `manifest.json`; a CI secret allowed to upload to it | PR 1.8 production setup | before the January mock run |
 | backend | **Schedule endpoint** returning `EventInfo` and `ScheduleItem[]` as defined in `apps/client/src/schedule/types.ts`. Times are ISO 8601 with offset, and an IANA `timeZone` comes with the event. Tell me if you need a different shape. Until then the client uses bundled sample data (`schedule/sample.ts`). | Swapping sample data for real calls | not blocking |
 | backend | **Current-user profile** with at least `firstName` and `team`. The client keeps those two in a `localStorage` snapshot (`gh:snapshot:v1`) so the first screen paints instantly. | Personalized Home | not blocking |
+| infra | Host the landing page (`apps/site`, a static Vite build) at `geauxhack.com`. Its Apply button links to `app.geauxhack.com`. | Public launch | before registration opens |
+| backend | **`POST /api/v1/notify`** on `app.geauxhack.com`, taking `{ "email": string }`. It stores the address for the "registration is open" email and returns 2xx. CORS must allow `https://geauxhack.com`. Until it exists, the landing page's form shows its error message. | Landing page "notify me" form | before the site goes public |
+| ops | A real sponsorship email address. `apps/site/src/content.ts` uses `sponsors@geauxhack.com` as a placeholder. Set `REGISTRATION_OPEN` in the same file to `true` when registration opens; the full landing page (story, tracks, FAQ, sponsor) appears then. | Landing page | before registration opens |
 | ops | **Real event dates.** The sample data uses Feb 20–21, 2027 as a placeholder. | Countdown and schedule | before registration opens |
 | design / art | SVG illustrations of Beau and the six Vespers (plus simple versions for small sizes), District icons, the Elysiu/Abyssus portal key art, and the app icon | PR 1.2 visuals, PR 1.4 icon and splash | 2026-12-05 |
 | backend | Application API: draft, submit, status, decision, confirmation deadline, waitlist release | PR 1.9 | not blocking |
