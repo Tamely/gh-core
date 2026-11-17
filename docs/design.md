@@ -40,7 +40,7 @@ The app should feel **modern, round and bouncy, like a native iOS app**, and car
   - **iOS 26 and later:** use Apple's real Liquid Glass material where possible. That needs a native tab bar (or a small custom Capacitor plugin using `UIGlassEffect`) over the WebView; decide in PR 1.4 whether it's worth the extra code. Older iOS versions use the CSS version.
   - The active tab gets a soft tinted lens behind its icon, not a solid fill.
 - **Things we avoid** (they read as generic AI-generated UI):
-  - **Pill-shaped tags and badges** ("Web & App", "Workshop · +50 pts", "ON DECK" chips). Use an icon tile, colored text, or a heading inside the card instead. Buttons and the tab bar can stay capsule-shaped.
+  - **Tinted background shapes behind small things:** pill-shaped tags and badges ("Web & App", "ON DECK" chips), and icons sitting in a pale rounded square or circle. The problem is the soft tinted container itself, whatever its shape. A small icon placed above or beside a card's title has the same generic look. If a card needs an icon, make it part of the card's background: large, faint (about 16% opacity), in the track color, cropped off a corner. Otherwise use colored text or a heading. Buttons and the tab bar can stay capsule-shaped.
   - **Middle-dot separators between words** ("PFT 1240 · in 12 min"). Write a phrase ("Starts in 12 min in PFT 1240") or split it into two elements.
   - **Lists of three in copy** ("purple, gold, the crown"). Say the one or two things that matter.
 - **Tabs, the same in both themes:** Home, Schedule, Scan, Map, Battle. Profile and the QR pass open from the avatar button at the top of Home.
