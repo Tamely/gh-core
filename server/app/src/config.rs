@@ -10,6 +10,9 @@ pub struct Config {
     pub database_url: String,
     pub db_max_connections: u32,
     pub db_min_connections: u32,
+    pub redis_url: String,
+    /// Internal port for `/metrics`. Don't expose it publicly.
+    pub metrics_port: u16,
     /// After SIGTERM, how long `/readyz` reports 503 before the server stops
     /// accepting connections, so the load balancer has time to notice.
     pub shutdown_delay: Duration,
@@ -28,6 +31,8 @@ impl Config {
             database_url: required(&lookup, "DATABASE_URL", &mut errors),
             db_max_connections: optional(&lookup, "DB_MAX_CONNECTIONS", 20, &mut errors),
             db_min_connections: optional(&lookup, "DB_MIN_CONNECTIONS", 2, &mut errors),
+            redis_url: required(&lookup, "REDIS_URL", &mut errors),
+            metrics_port: optional(&lookup, "METRICS_PORT", 9090, &mut errors),
             shutdown_delay: Duration::from_millis(optional(
                 &lookup,
                 "SHUTDOWN_DELAY_MS",
@@ -36,6 +41,9 @@ impl Config {
             )),
         };
 
+        if config.metrics_port == config.http_port {
+            errors.push("METRICS_PORT must differ from HTTP_PORT".into());
+        }
         if config.db_max_connections == 0 {
             errors.push("DB_MAX_CONNECTIONS must be at least 1".into());
         }
@@ -110,26 +118,37 @@ mod tests {
     }
 
     const DB: (&str, &str) = ("DATABASE_URL", "postgres://localhost/gh");
+    const REDIS: (&str, &str) = ("REDIS_URL", "redis://localhost:6379");
 
     #[test]
     fn defaults_when_only_required_is_set() {
-        let config = Config::from_lookup(vars(&[DB])).unwrap();
+        let config = Config::from_lookup(vars(&[DB, REDIS])).unwrap();
         assert_eq!(config.http_port, 8080);
         assert_eq!(config.db_max_connections, 20);
         assert_eq!(config.db_min_connections, 2);
         assert_eq!(config.shutdown_delay, Duration::from_secs(5));
+        assert_eq!(config.metrics_port, 9090);
     }
 
     #[test]
-    fn missing_database_url_is_an_error() {
+    fn missing_urls_are_errors() {
         let errors = Config::from_lookup(vars(&[])).unwrap_err();
+        assert_eq!(
+            errors,
+            ["DATABASE_URL is required", "REDIS_URL is required"]
+        );
+    }
+
+    #[test]
+    fn blank_url_is_an_error() {
+        let errors = Config::from_lookup(vars(&[("DATABASE_URL", "  "), REDIS])).unwrap_err();
         assert_eq!(errors, ["DATABASE_URL is required"]);
     }
 
     #[test]
-    fn blank_database_url_is_an_error() {
-        let errors = Config::from_lookup(vars(&[("DATABASE_URL", "  ")])).unwrap_err();
-        assert_eq!(errors, ["DATABASE_URL is required"]);
+    fn metrics_port_must_differ_from_http_port() {
+        let errors = Config::from_lookup(vars(&[DB, REDIS, ("METRICS_PORT", "8080")])).unwrap_err();
+        assert_eq!(errors, ["METRICS_PORT must differ from HTTP_PORT"]);
     }
 
     #[test]
@@ -139,15 +158,17 @@ mod tests {
             ("DB_MAX_CONNECTIONS", "lots"),
         ]))
         .unwrap_err();
-        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert_eq!(errors.len(), 4, "{errors:?}");
         assert!(errors[0].starts_with("HTTP_PORT="));
         assert_eq!(errors[1], "DATABASE_URL is required");
         assert!(errors[2].starts_with("DB_MAX_CONNECTIONS="));
+        assert_eq!(errors[3], "REDIS_URL is required");
     }
 
     #[test]
     fn rejects_zero_and_inverted_pool_sizes() {
-        let errors = Config::from_lookup(vars(&[DB, ("DB_MAX_CONNECTIONS", "0")])).unwrap_err();
+        let errors =
+            Config::from_lookup(vars(&[DB, REDIS, ("DB_MAX_CONNECTIONS", "0")])).unwrap_err();
         assert!(
             errors.iter().any(|e| e.contains("at least 1")),
             "{errors:?}"
@@ -155,6 +176,7 @@ mod tests {
 
         let errors = Config::from_lookup(vars(&[
             DB,
+            REDIS,
             ("DB_MAX_CONNECTIONS", "4"),
             ("DB_MIN_CONNECTIONS", "5"),
         ]))
@@ -167,19 +189,21 @@ mod tests {
 
     #[test]
     fn rejects_negative_numbers() {
-        let errors = Config::from_lookup(vars(&[DB, ("DB_MIN_CONNECTIONS", "-1")])).unwrap_err();
+        let errors =
+            Config::from_lookup(vars(&[DB, REDIS, ("DB_MIN_CONNECTIONS", "-1")])).unwrap_err();
         assert!(errors[0].starts_with("DB_MIN_CONNECTIONS="), "{errors:?}");
     }
 
     #[test]
     fn shutdown_delay_must_fit_inside_drain_limit() {
-        let errors = Config::from_lookup(vars(&[DB, ("SHUTDOWN_DELAY_MS", "15000")])).unwrap_err();
+        let errors =
+            Config::from_lookup(vars(&[DB, REDIS, ("SHUTDOWN_DELAY_MS", "15000")])).unwrap_err();
         assert!(errors[0].contains("drain limit"), "{errors:?}");
     }
 
     #[test]
     fn trims_whitespace_around_numbers() {
-        let config = Config::from_lookup(vars(&[DB, ("HTTP_PORT", " 9000 ")])).unwrap();
+        let config = Config::from_lookup(vars(&[DB, REDIS, ("HTTP_PORT", " 9000 ")])).unwrap();
         assert_eq!(config.http_port, 9000);
     }
 }

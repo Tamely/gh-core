@@ -6,8 +6,10 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use metrics::gauge;
 use sqlx::{
-    Connection, PgConnection, PgPool,
+    Connection, PgConnection, PgPool, Postgres,
+    pool::PoolConnection,
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 
@@ -23,6 +25,20 @@ pub async fn connect(config: &Config) -> Result<PgPool, sqlx::Error> {
         .acquire_timeout(ACQUIRE_TIMEOUT)
         .connect_with(connect_options(&config.database_url)?)
         .await
+}
+
+/// Takes a connection from the pool. Handlers should acquire through this so
+/// the `db_pool_waiting` metric counts them while they wait.
+pub async fn acquire(pool: &PgPool) -> Result<PoolConnection<Postgres>, sqlx::Error> {
+    struct Waiting;
+    impl Drop for Waiting {
+        fn drop(&mut self) {
+            gauge!("db_pool_waiting").decrement(1.0);
+        }
+    }
+    gauge!("db_pool_waiting").increment(1.0);
+    let _waiting = Waiting; // decrements on return, error, or cancellation
+    pool.acquire().await
 }
 
 /// Every pooled connection starts with these limits, so one slow query or a

@@ -11,21 +11,15 @@ use axum::{
     routing::get,
 };
 
-use common::send;
+use common::{TestRedis, offline_pool, send, start_redis, state};
 use gh_server::{AppState, routes, serve, with_middleware};
-use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-/// State whose pool never connects; fine for routes that don't use it.
-fn offline_state() -> AppState {
-    AppState {
-        db: PgPoolOptions::new()
-            .acquire_timeout(Duration::from_millis(200))
-            .connect_lazy("postgres://nobody@127.0.0.1:1/none")
-            .unwrap(),
-        shutdown: CancellationToken::new(),
-    }
+/// State whose Postgres pool never connects; fine for routes that don't use it.
+async fn offline_state() -> (AppState, TestRedis) {
+    let redis = start_redis().await;
+    (state(offline_pool(), &redis.url).await, redis)
 }
 
 fn app_with_sleep(state: AppState) -> Router {
@@ -46,7 +40,8 @@ fn app_with_sleep(state: AppState) -> Router {
 
 #[tokio::test]
 async fn generates_request_id_or_keeps_the_clients() {
-    let app = app_with_sleep(offline_state());
+    let (state, _redis) = offline_state().await;
+    let app = app_with_sleep(state);
     let res = send(&app, "/healthz").await;
     assert_eq!(res.status(), StatusCode::OK);
     let id = res.headers()["x-request-id"].to_str().unwrap();
@@ -67,7 +62,8 @@ async fn generates_request_id_or_keeps_the_clients() {
 
 #[tokio::test]
 async fn request_over_three_seconds_gets_503_with_retry_after() {
-    let app = app_with_sleep(offline_state());
+    let (state, _redis) = offline_state().await;
+    let app = app_with_sleep(state);
     let started = Instant::now();
     let res = send(&app, "/test/sleep/10000").await;
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -81,13 +77,14 @@ async fn request_over_three_seconds_gets_503_with_retry_after() {
 
 #[tokio::test]
 async fn unknown_route_is_404() {
-    let app = app_with_sleep(offline_state());
+    let (state, _redis) = offline_state().await;
+    let app = app_with_sleep(state);
     assert_eq!(send(&app, "/nope").await.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn readyz_is_503_once_shutdown_starts() {
-    let state = offline_state();
+    let (state, _redis) = offline_state().await;
     let shutdown = state.shutdown.clone();
     let app = app_with_sleep(state);
     shutdown.cancel();
@@ -102,10 +99,11 @@ struct Running {
     url: String,
     shutdown: CancellationToken,
     server: tokio::task::JoinHandle<std::io::Result<()>>,
+    _redis: TestRedis,
 }
 
 async fn start(delay: Duration, drain_limit: Duration) -> Running {
-    let state = offline_state();
+    let (state, redis) = offline_state().await;
     let shutdown = state.shutdown.clone();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -120,6 +118,7 @@ async fn start(delay: Duration, drain_limit: Duration) -> Running {
         url,
         shutdown,
         server,
+        _redis: redis,
     }
 }
 

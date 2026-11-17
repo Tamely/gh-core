@@ -1,9 +1,15 @@
 //! gh-core API server.
 
+pub mod auth;
 pub mod config;
 pub mod db;
+pub mod events;
+pub mod hub;
+pub mod metrics;
+pub mod topic;
+pub mod ws;
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use axum::{
     Router,
@@ -35,6 +41,10 @@ pub const READY_CHECK_TIMEOUT: Duration = Duration::from_millis(500);
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    pub events: events::Events,
+    pub hub: Arc<hub::Hub>,
+    pub authorizer: Arc<dyn auth::Authorizer>,
+    pub ws: ws::Settings,
     /// Cancelled when shutdown starts.
     pub shutdown: CancellationToken,
 }
@@ -44,6 +54,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/healthz", get(|| async { StatusCode::OK }))
         .route("/readyz", get(readyz))
+        .route("/api/v1/ws", get(ws::upgrade))
 }
 
 /// Wraps a router in the middleware every request goes through.
@@ -58,6 +69,7 @@ pub fn with_middleware(router: Router) -> Router {
             REQUEST_TIMEOUT,
         ))
         .layer(middleware::map_response(add_retry_after))
+        .layer(middleware::from_fn(metrics::track_http))
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(
             TraceLayer::new_for_http()
@@ -88,15 +100,20 @@ async fn add_retry_after(mut res: Response) -> Response {
     res
 }
 
-/// 200 when this instance should get traffic: not shutting down, and Postgres
-/// answers within the check timeout.
+/// 200 when this instance should get traffic: not shutting down, and both
+/// Postgres and Redis answer within the check timeout.
 async fn readyz(State(state): State<AppState>) -> StatusCode {
     if state.shutdown.is_cancelled() {
         return StatusCode::SERVICE_UNAVAILABLE;
     }
-    let ping = sqlx::query("SELECT 1").execute(&state.db);
-    match tokio::time::timeout(READY_CHECK_TIMEOUT, ping).await {
-        Ok(Ok(_)) => StatusCode::OK,
+    let postgres = async {
+        let mut conn = db::acquire(&state.db).await?;
+        sqlx::query("SELECT 1").execute(&mut *conn).await?;
+        Ok::<_, sqlx::Error>(())
+    };
+    let checks = async { tokio::join!(postgres, state.events.ping()) };
+    match tokio::time::timeout(READY_CHECK_TIMEOUT, checks).await {
+        Ok((Ok(()), Ok(()))) => StatusCode::OK,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     }
 }

@@ -1,4 +1,10 @@
-use gh_server::{AppState, DRAIN_TIMEOUT, app, config::Config, db, serve, shutdown_signal};
+use std::sync::Arc;
+
+use gh_server::{
+    AppState, DRAIN_TIMEOUT, app, auth::AllowAll, config::Config, db, events, hub::Hub, metrics,
+    serve, shutdown_signal, ws,
+};
+use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
@@ -14,6 +20,7 @@ async fn main() {
         .with_current_span(true)
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+    let metrics = metrics::install();
 
     let config = Config::from_env().unwrap_or_else(|errors| {
         for error in errors {
@@ -29,10 +36,25 @@ async fn main() {
         .await
         .unwrap_or_else(|e| fail(&format!("can't connect to Postgres: {e}")));
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.http_port))
+    let hub = Arc::new(Hub::default());
+    let (events, _subscriber) = events::connect(&config.redis_url, hub.clone())
         .await
-        .unwrap_or_else(|e| fail(&format!("can't listen on port {}: {e}", config.http_port)));
-    tracing::info!(port = config.http_port, "listening");
+        .unwrap_or_else(|e| fail(&format!("can't connect to Redis: {e}")));
+
+    let listener = bind(config.http_port).await;
+    let metrics_listener = bind(config.metrics_port).await;
+    tracing::info!(
+        port = config.http_port,
+        metrics_port = config.metrics_port,
+        "listening"
+    );
+    let metrics_pool = pool.clone();
+    tokio::spawn(async move {
+        let router = metrics::router(metrics, metrics_pool);
+        if let Err(e) = axum::serve(metrics_listener, router).await {
+            tracing::error!("metrics server stopped: {e}");
+        }
+    });
 
     let shutdown = CancellationToken::new();
     tokio::spawn({
@@ -46,6 +68,10 @@ async fn main() {
 
     let state = AppState {
         db: pool.clone(),
+        events,
+        hub,
+        authorizer: Arc::new(AllowAll),
+        ws: ws::Settings::default(),
         shutdown: shutdown.clone(),
     };
     if let Err(e) = serve(
@@ -61,6 +87,12 @@ async fn main() {
     }
     pool.close().await;
     tracing::info!("stopped");
+}
+
+async fn bind(port: u16) -> TcpListener {
+    TcpListener::bind(("0.0.0.0", port))
+        .await
+        .unwrap_or_else(|e| fail(&format!("can't listen on port {port}: {e}")))
 }
 
 fn fail(message: &str) -> ! {

@@ -207,8 +207,8 @@ fn test_app(state: AppState) -> Router {
 #[tokio::test]
 async fn exhausted_pool_answers_503_within_two_seconds_and_recovers() {
     const MAX: u32 = 4;
-    let db = start_postgres().await;
-    let app = test_app(state(migrated_pool(&db, MAX).await));
+    let (db, redis) = tokio::join!(start_postgres(), start_redis());
+    let app = test_app(state(migrated_pool(&db, MAX).await, &redis.url).await);
 
     let started = Instant::now();
     let requests: Vec<_> = (0..MAX * 5)
@@ -245,8 +245,8 @@ async fn exhausted_pool_answers_503_within_two_seconds_and_recovers() {
 
 #[tokio::test]
 async fn readyz_follows_postgres_while_healthz_stays_up() {
-    let db = start_postgres().await;
-    let app = app(state(migrated_pool(&db, 4).await));
+    let (db, redis) = tokio::join!(start_postgres(), start_redis());
+    let app = app(state(migrated_pool(&db, 4).await, &redis.url).await);
     assert_eq!(send(&app, "/readyz").await.status(), StatusCode::OK);
 
     db.container.pause().await.unwrap();
@@ -268,8 +268,8 @@ async fn readyz_follows_postgres_while_healthz_stays_up() {
 async fn pool_replaces_connections_that_postgres_drops() {
     // What a Postgres restart or failover looks like to the pool: every
     // server-side connection disappears at once.
-    let db = start_postgres().await;
-    let app = test_app(state(migrated_pool(&db, 4).await));
+    let (db, redis) = tokio::join!(start_postgres(), start_redis());
+    let app = test_app(state(migrated_pool(&db, 4).await, &redis.url).await);
     assert_eq!(send(&app, "/test/fast").await.status(), StatusCode::OK);
 
     let admin = sqlx::PgPool::connect(&db.url).await.unwrap();
@@ -300,11 +300,11 @@ async fn unexpected_database_error_is_500() {
             .await?;
         Ok(StatusCode::OK)
     }
-    let db = start_postgres().await;
+    let (db, redis) = tokio::join!(start_postgres(), start_redis());
     let app = with_middleware(
         routes()
             .route("/test/bad", get(bad_sql))
-            .with_state(state(migrated_pool(&db, 2).await)),
+            .with_state(state(migrated_pool(&db, 2).await, &redis.url).await),
     );
     let res = send(&app, "/test/bad").await;
     assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
