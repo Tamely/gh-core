@@ -34,50 +34,61 @@ html {
   }
 }
 
-/* Every 6.5s the crown falls into the pothole and the pothole flashes gold. */
+/* Once the drawing is in, the crown falls once, bounces, and stays tipped over
+   on the rim of the pothole. The pothole flashes when it lands, then keeps a
+   soft glow, as if the portal is still open. */
 .crown-drop {
   transform-box: fill-box;
   transform-origin: 50% 100%;
-  animation: crown-drop 6.5s 2s infinite;
+  animation: crown-drop 1.5s 1.8s both;
 }
 @keyframes crown-drop {
   0% {
-    transform: translateY(-420px);
+    transform: translateY(-420px) rotate(0deg);
     opacity: 0;
     animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
   }
-  4% {
+  8% {
     opacity: 1;
   }
-  26% {
-    transform: translateY(30px) scale(0.7, 0.5);
-    opacity: 1;
+  62% {
+    transform: translateY(30px) rotate(-6deg);
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1);
   }
-  30% {
-    transform: translateY(40px) scale(0.3, 0.1);
-    opacity: 0;
+  78% {
+    transform: translateY(20px) rotate(-12deg);
+    animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.5);
   }
   100% {
-    transform: translateY(40px) scale(0.3, 0.1);
-    opacity: 0;
+    transform: translateY(30px) rotate(-16deg);
+    opacity: 1;
   }
 }
 .pothole-glow {
   opacity: 0;
   filter: blur(6px);
-  animation: pothole-glow 6.5s 2s infinite;
+  animation:
+    pothole-flash 1.2s 2.7s both,
+    pothole-breathe 4s 3.9s ease-in-out infinite;
 }
-@keyframes pothole-glow {
-  0%,
-  25% {
+@keyframes pothole-flash {
+  0% {
     opacity: 0;
   }
-  30% {
-    opacity: 0.85;
+  20% {
+    opacity: 0.9;
   }
-  60%,
   100% {
-    opacity: 0;
+    opacity: 0.25;
+  }
+}
+@keyframes pothole-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.45;
   }
 }
 
@@ -85,10 +96,13 @@ html {
   .sketch {
     stroke-dashoffset: 0;
   }
-  /* Without motion the crown just hovers over the pothole. */
+  /* Without motion, show where it ends up: the crown resting on the rim. */
   .crown-drop {
     opacity: 1;
-    transform: none;
+    transform: translateY(30px) rotate(-16deg);
+  }
+  .pothole-glow {
+    opacity: 0.25;
   }
 }
 
