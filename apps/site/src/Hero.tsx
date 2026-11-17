@@ -123,9 +123,9 @@ function Cloud(props: { class: string; style: Record<string, string> }) {
   return (
     <svg
       aria-hidden="true"
-      width="120"
-      height="48"
-      viewBox="0 0 120 48"
+      width="132"
+      height="72"
+      viewBox="-6 -20 132 72"
       fill="none"
       stroke="currentColor"
       stroke-width="1.4"
@@ -145,7 +145,8 @@ function Cloud(props: { class: string; style: Record<string, string> }) {
  */
 function Skyline() {
   const ink = "sketch fill-none stroke-ink-inverse/80";
-  const at = (x: number) => `translate(${x} 20)`;
+  // Shapes are drawn with their base at y=230; +40 sits them on the road at y=270.
+  const at = (x: number) => `translate(${x} 40)`;
   const delay = (s: number) => ({ "animation-delay": `${s}s` });
 
   // Shapes drawn at their own origin; placed below with translate().
@@ -164,7 +165,9 @@ function Skyline() {
     <svg
       viewBox="0 0 1600 320"
       preserveAspectRatio="xMidYMax slice"
-      class="absolute inset-x-0 bottom-0 -z-10 h-[38vh] max-h-[360px] min-h-[200px] w-full"
+      // Height follows width at the drawing's 5:1 ratio, so wide screens never
+      // crop the top (the tower). Narrow screens crop the sides instead.
+      class="absolute inset-x-0 bottom-0 -z-10 h-[max(20vw,200px)] w-full"
       stroke-width="1.4"
       stroke-linecap="round"
       stroke-linejoin="round"
@@ -211,7 +214,7 @@ function Skyline() {
         class={ink}
         style={delay(0.65)}
         cx="372"
-        cy="108"
+        cy="128"
         r="7"
       />
       <path
