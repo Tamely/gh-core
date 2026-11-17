@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "idb-keyval": "6.3.0",
-    "solid-js": "1.9.19"
+    "solid-js": "1.9.19",
+    "@gh-core/brand": "workspace:*"
   },
   "devDependencies": {
     "@solidjs/testing-library": "0.8.10",

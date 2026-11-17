@@ -6,11 +6,15 @@ _Last updated: 2026-11-17_
 **PR 1 series: client shell.** The SolidJS PWA at `apps/client/` and its Capacitor iOS/Android wrapper: offline shell, PWA, native plugins, store builds, OTA updates.
 
 ## Status
-- **PR 1.1 (scaffold):** pushed on branch `pr-1.1-scaffold`. The draft PR isn't open yet because the built-in browser isn't signed in to GitHub, so CI hasn't run there.
-- **PR 1.2 (app shell):** on branch `pr-1.2-app-shell`, built on top of 1.1 and not committed yet.
-  - Done: theme from the style tile, the Allo font, the custom router, storage, five glass tabs, and Home and Schedule from sample data.
-  - All checks pass locally (16 tests). The initial shell is 13.17KB gzipped, 38% of the budget.
-  - Checked in the browser at phone size, in both themes. The design direction is in [`docs/design.md`](../docs/design.md): the Allo font, round and bouncy iOS feel, Elysiu (light) / Abyssus (dark) themes, District colors, and a registration flow modeled on HackMIT's. PR 1.2 turns it into the Tailwind theme.
+- **PR 1.1 (scaffold):** draft PR open at https://github.com/Tamely/gh-core/pull/1.
+- **PR 1.2 (app shell):** committed on branch `pr-1.2-app-shell` (built on 1.1), not pushed yet.
+  - Contents: theme, Allo, the custom router, storage, five glass tabs, and Home and Schedule from sample data.
+  - Home and Schedule were reworked away from stacked cards: the countdown is type on the page, Up next is a timeline, and Schedule is a divided list with sticky day headers.
+  - All checks pass (16 tests). The initial shell is 14.09KB gzipped.
+- **Landing page:** branch `landing-page` (built on 1.2), not pushed yet.
+  - New `apps/site`, the public site for `geauxhack.org`. The hero is as simple as HackUTD's, followed by the story chapters, a hover split for Beau vs. Parkeaux, District rows, a dates timeline, FAQ, a sponsor band and the footer. No cards.
+  - New `packages/brand` holds the theme CSS shared by the app and the site.
+- **Design:** [`docs/design.md`](../docs/design.md). The style canvas (link under Decisions) now matches the code, with Home, Schedule and the landing hero.
 
 ### PR plan
 | PR | Scope | Blocked on |
@@ -23,6 +27,7 @@ _Last updated: 2026-11-17_
 | 1.6 Store builds | fastlane `ios beta` (local Mac) and `android beta`, signing set up, TestFlight and Play Closed Testing live on physical devices | ops: store accounts, 12 testers |
 | 1.7 Deep links | Associated Domains / App Links for `app.geauxhack.org` (`/judge/:token`, `/auth/callback`, `/n/:id`) | infra: hosting the `.well-known` files |
 | 1.9 Registration UI | HackMIT-style application lifecycle: public timeline, multi-step application saved as drafts, status card, confirmation (RSVP). See `docs/design.md`. | auth: sign-in; backend: application API |
+| Landing page | `apps/site` for `geauxhack.org`, sharing `packages/brand` with the app | infra: hosting for `geauxhack.org`; ops: real dates and a sponsor email |
 | 1.8 OTA | `@capgo/capacitor-updater` self-hosted: signed bundles, `manifest.json` with minimum native version, update check on foreground, rollback via `notifyAppReady()`, CI publishing step. Built and tested against a local server first. | infra: CDN bucket for the production setup |
 
 ## Decisions
@@ -78,6 +83,8 @@ _Last updated: 2026-11-17_
 | infra | CDN bucket and URL for OTA bundles plus `manifest.json`; a CI secret allowed to upload to it | PR 1.8 production setup | before the January mock run |
 | backend | **Schedule endpoint** returning `EventInfo` and `ScheduleItem[]` as defined in `apps/client/src/schedule/types.ts`. Times are ISO 8601 with offset, and an IANA `timeZone` comes with the event. Tell me if you need a different shape. Until then the client uses bundled sample data (`schedule/sample.ts`). | Swapping sample data for real calls | not blocking |
 | backend | **Current-user profile** with at least `firstName` and `team`. The client keeps those two in a `localStorage` snapshot (`gh:snapshot:v1`) so the first screen paints instantly. | Personalized Home | not blocking |
+| infra | Host the landing page (`apps/site`, a static Vite build) at `geauxhack.org`. Its Apply button links to `app.geauxhack.org`. | Public launch | before registration opens |
+| ops | A real sponsorship email address. `apps/site/src/content.ts` uses `sponsors@geauxhack.org` as a placeholder. Application milestone dates go in the same file. | Landing page | before registration opens |
 | ops | **Real event dates.** The sample data uses Feb 20–21, 2027 as a placeholder. | Countdown and schedule | before registration opens |
 | design / art | SVG illustrations of Beau and the six Vespers (plus simple versions for small sizes), District icons, the Elysiu/Abyssus portal key art, and the app icon | PR 1.2 visuals, PR 1.4 icon and splash | 2026-12-05 |
 | backend | Application API: draft, submit, status, decision, confirmation deadline, waitlist release | PR 1.9 | not blocking |

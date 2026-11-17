@@ -20,6 +20,8 @@ pnpm dev
 
 ## Layout
 
-- `apps/client/`: the SolidJS client (Vite, TypeScript, Tailwind).
+- `apps/client/`: the event app, a SolidJS PWA (Vite, TypeScript, Tailwind).
+- `apps/site/`: the public landing page for geauxhack.org.
+- `packages/brand/`: theme CSS shared by both.
 - `docs/design.md`: design direction.
 - `handoffs/`: each contributor's handoff notes. Read [AGENTS.md](AGENTS.md) before working here.

@@ -8,7 +8,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
-    files: ["apps/client/**/*.{ts,tsx}"],
+    files: ["apps/**/*.{ts,tsx}"],
     ...solid,
     languageOptions: {
       ...solid.languageOptions,
