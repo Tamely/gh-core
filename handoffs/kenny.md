@@ -15,13 +15,14 @@ Four stacked branches, local only, not pushed yet. Each builds on the one before
 | `kenny/server-realtime` | Redis fan-out, WebSocket hub at `/api/v1/ws`, `resync`/1013/1012, `/metrics` on port 9090 | done |
 | `kenny/server-bench` | `server/bench` load tool, plus three fixes it found: `TCP_NODELAY`, metrics upkeep, resync after re-subscribe | done |
 | `kenny/server-hardening` | `/readyz` on its own connection, request-ID validation, subscribe reply ordering, slow clients in the bench, test and build fixes | done |
+| `kenny/server-edge-cases` | Redis command timeout and bigger buffers (bursts no longer cause resyncs), startup checks (URL schemes, port 0, 10s Postgres connect limit), tests that run the real binary, 25 more edge-case tests | done |
 
 PR descriptions are drafted in `pr-drafts/` (not committed).
 
 Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machine, 1,000 clients over 25 rooms, 250 teams, 10 mentor tags, 100 events/s):
 - 10-minute run: 0 dropped, 0 errors, 2,175,040/2,175,040 deliveries, 0 `seq` gaps.
 - Publish to every subscriber: p99 2.43ms, max 6.1ms.
-- Memory: 10.9MB idle 60s after start; 60MB with 1,000 clients, flat for 10 minutes.
+- Memory: 17MB idle 60s after start; 65.6MB with 1,000 clients, flat (was 10.9MB / 60MB before the burst fixes).
 - Two instances on one Redis: every event delivered across instances, p99 2.5ms.
 - SIGTERM with 1,000 clients: all got 1012, exit 0 after 5.5s.
 - Image 11.5MB.
@@ -49,6 +50,11 @@ Not started: Josh's backend requests (application API, team pick endpoint with t
 - **Client `x-request-id` values are kept only if short and plain** (64 chars of `A-Za-z0-9-_.:`), because they go into every log line.
 - **The subscribe reply is queued before forwarding starts**, so `subscribed` always comes before the topic's first event.
 - **Dev builds drop dependency debug info.** `target/` hit 10.5GB and filled the disk; now about 2GB.
+- **Redis commands time out after 1s.** The client's default is no timeout, so a publish during a Redis outage hung until the request timeout.
+- **Bursts don't look like slow clients.** The Redis client's event buffers hold 1024 messages (default 32; 8192 cost 22MB idle because every channel reserves its slots up front), and each connection's send queue is 512 (was 64). Before, a burst of a few dozen events made clients resync. Queued events share their bytes, so a full queue is about 20KB.
+- **Startup rejects URLs for the wrong service and port 0.** The Postgres driver ignores the scheme, so `mysql://host/db` connected to whatever Postgres was on that host.
+- **Startup gives up on Postgres after 10s.** A host that drops packets held startup for ~20s on Windows and ~2 minutes on Linux.
+- **Redis TLS (`rediss://`) isn't supported yet**: it needs fred's TLS feature. Say if managed Redis needs it.
 - **Use `127.0.0.1`, not `localhost`, in local URLs.** On Windows, `localhost` tries IPv6 first and takes about 2s to fall back, which is the whole acquire timeout.
 
 ## Provides to others

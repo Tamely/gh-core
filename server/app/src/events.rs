@@ -109,8 +109,9 @@ fn redis_config(url: &str) -> Result<Builder, Error> {
             p.default_command_timeout = Duration::from_secs(1);
             // Messages from Redis wait here until the forwarding task takes
             // them. The default of 32 turned any burst of events into a
-            // resync for every client.
-            p.broadcast_channel_capacity = 8192;
+            // resync for every client. Every one of the client's event
+            // channels reserves this many slots up front: 8192 cost 22MB idle.
+            p.broadcast_channel_capacity = 1024;
         })
         // Retry forever: 100ms, 200ms, 400ms ... capped at 10s.
         .set_policy(ReconnectPolicy::new_exponential(0, 100, 10_000, 2));
