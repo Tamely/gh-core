@@ -41,6 +41,27 @@ impl Config {
             )),
         };
 
+        // The Postgres driver ignores the scheme, so `mysql://host/db` would
+        // quietly connect to whatever Postgres listens on that host.
+        let scheme_ok = |url: &str, schemes: &[&str]| {
+            url.is_empty() || schemes.iter().any(|s| url.starts_with(s))
+        };
+        if !scheme_ok(&config.database_url, &["postgres://", "postgresql://"]) {
+            errors.push("DATABASE_URL must start with postgres:// or postgresql://".into());
+        }
+        // TLS (rediss://) needs fred's TLS feature, which isn't enabled yet.
+        if !scheme_ok(&config.redis_url, &["redis://"]) {
+            errors.push("REDIS_URL must start with redis://".into());
+        }
+        // Port 0 means "any free port", which a load balancer can't find.
+        for (name, port) in [
+            ("HTTP_PORT", config.http_port),
+            ("METRICS_PORT", config.metrics_port),
+        ] {
+            if port == 0 {
+                errors.push(format!("{name} must not be 0"));
+            }
+        }
         if config.metrics_port == config.http_port {
             errors.push("METRICS_PORT must differ from HTTP_PORT".into());
         }
@@ -199,6 +220,34 @@ mod tests {
         let errors =
             Config::from_lookup(vars(&[DB, REDIS, ("SHUTDOWN_DELAY_MS", "15000")])).unwrap_err();
         assert!(errors[0].contains("drain limit"), "{errors:?}");
+    }
+
+    #[test]
+    fn rejects_urls_for_the_wrong_service() {
+        let errors = Config::from_lookup(vars(&[
+            ("DATABASE_URL", "mysql://localhost/gh"),
+            ("REDIS_URL", "http://localhost:6379"),
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            errors,
+            [
+                "DATABASE_URL must start with postgres:// or postgresql://",
+                "REDIS_URL must start with redis://",
+            ]
+        );
+        for ok in ["postgres://u@h/db", "postgresql://u@h/db"] {
+            assert!(
+                Config::from_lookup(vars(&[("DATABASE_URL", ok), REDIS])).is_ok(),
+                "{ok}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_port_zero() {
+        let errors = Config::from_lookup(vars(&[DB, REDIS, ("HTTP_PORT", "0")])).unwrap_err();
+        assert_eq!(errors, ["HTTP_PORT must not be 0"]);
     }
 
     #[test]

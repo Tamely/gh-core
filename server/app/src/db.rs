@@ -15,6 +15,9 @@ use sqlx::{
 
 use crate::config::Config;
 
+/// How long startup waits for Postgres to answer at all.
+pub const STARTUP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// How long a request waits for a free connection before getting a 503.
 pub const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -65,7 +68,17 @@ pub fn connect_options(url: &str) -> Result<PgConnectOptions, sqlx::Error> {
 /// since creating extensions or indexes can take longer than that. When two
 /// instances start together, sqlx's advisory lock makes one wait for the other.
 pub async fn migrate(url: &str) -> Result<(), sqlx::migrate::MigrateError> {
-    let mut conn = PgConnection::connect(url).await?;
+    // A host that drops packets would otherwise hold startup until the OS
+    // gives up on the TCP connect: about 20s on Windows, 2 minutes on Linux.
+    let connect = PgConnection::connect(url);
+    let mut conn = tokio::time::timeout(STARTUP_CONNECT_TIMEOUT, connect)
+        .await
+        .map_err(|_| {
+            sqlx::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("no answer from Postgres within {STARTUP_CONNECT_TIMEOUT:?}"),
+            ))
+        })??;
     sqlx::migrate!().run(&mut conn).await?;
     conn.close().await?;
     Ok(())

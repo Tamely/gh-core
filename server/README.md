@@ -33,16 +33,20 @@ docker run --rm -p 8080:8080 -e DATABASE_URL=... -e REDIS_URL=... gh-server
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATABASE_URL` | required | Postgres connection string |
+| `DATABASE_URL` | required | Postgres connection string (`postgres://` or `postgresql://`) |
 | `DB_MAX_CONNECTIONS` | `20` | Pool size. Each instance also keeps 1 connection for `/readyz`, and two instances run side by side during a deploy, so keep 2 × (this + 1) well below Postgres's `max_connections` |
 | `DB_MIN_CONNECTIONS` | `2` | Connections kept open while idle |
-| `REDIS_URL` | required | Redis connection string |
+| `REDIS_URL` | required | Redis connection string (`redis://`; TLS isn't enabled yet) |
 | `HTTP_PORT` | `8080` | Public HTTP port |
 | `METRICS_PORT` | `9090` | Internal port for `/metrics`. Don't expose it publicly |
 | `SHUTDOWN_DELAY_MS` | `5000` | After SIGTERM, how long `/readyz` reports 503 before new connections are refused |
 | `RUST_LOG` | `info` | Log filter, e.g. `gh_server=debug` |
 
 ## Behaviour
+
+- **Startup** fails with exit code 1 and one log line per problem if any
+  setting is missing or wrong, if Postgres doesn't answer within 10s, if
+  Redis can't be reached, or if a port is taken.
 
 - **Logs** are JSON, one line per event. Every request gets an `x-request-id`
   (kept from the client if sent) that appears in its log lines and the response.
