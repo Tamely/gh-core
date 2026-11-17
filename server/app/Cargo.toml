@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 axum = "0.8.9"
 mimalloc = "0.1.52"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "postgres", "migrate", "macros"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
 tokio-util = "0.7.20"
 tower-http = { version = "0.7.1", features = ["timeout", "request-id", "trace", "compression-gzip", "util"] }
@@ -13,4 +14,8 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
 
 [dev-dependencies]
+http-body-util = "0.1.5"
+reqwest = { version = "0.13.5", default-features = false }
+testcontainers-modules = { version = "0.15.0", features = ["postgres", "redis"] }
+tokio = { version = "1.54.1", features = ["test-util"] }
 tower = { version = "0.5.3", features = ["util"] }
