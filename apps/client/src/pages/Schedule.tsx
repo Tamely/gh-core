@@ -14,19 +14,20 @@ export function Schedule() {
       <h1 class="text-[30px] font-extrabold tracking-[-0.03em]">Schedule</h1>
       <For each={days}>
         {(day) => (
-          <section class="flex flex-col gap-3">
-            <h2 class="px-1 text-[13px] font-semibold tracking-[0.1em] text-muted uppercase dark:text-muted-inverse">
+          <section>
+            {/* Day headers stick to the top while that day scrolls past. */}
+            <h2 class="sticky top-0 z-[1] -mx-5 bg-paper/85 px-5 pt-[max(12px,env(safe-area-inset-top))] pb-2 text-[13px] font-semibold tracking-[0.1em] text-muted uppercase backdrop-blur-md dark:bg-abyss/85 dark:text-muted-inverse">
               {day.day}
             </h2>
-            <ul class="flex flex-col rounded-[24px] bg-surface px-[18px] dark:bg-abyss-surface">
+            <ul class="flex flex-col">
               <For each={day.items}>
                 {(item) => (
-                  <li class="flex gap-4 border-b border-line py-3.5 last:border-b-0 dark:border-abyss-line">
-                    <span class="w-[72px] shrink-0 pt-0.5 text-sm font-semibold text-muted tabular-nums dark:text-muted-inverse">
+                  <li class="flex gap-4 border-b border-line py-4 last:border-b-0 dark:border-abyss-line">
+                    <span class="w-[68px] shrink-0 pt-0.5 text-sm font-semibold text-muted tabular-nums dark:text-muted-inverse">
                       {formatTime(item.startsAt, sampleEvent.timeZone)}
                     </span>
                     <div class="flex min-w-0 grow flex-col gap-0.5">
-                      <span class="text-base leading-snug font-bold">
+                      <span class="text-[17px] leading-snug font-bold">
                         {item.title}
                       </span>
                       <span class="text-[13px]">
