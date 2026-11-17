@@ -27,10 +27,12 @@ export const HomeIcon = (p: P) => (
     <path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />
   </Icon>
 );
-export const CalendarIcon = (p: P) => (
+/** A lifebuoy, for asking a mentor for help. */
+export const HelpIcon = (p: P) => (
   <Icon size={p.size} class={p.class}>
-    <rect x="3" y="5" width="18" height="16" rx="3" />
-    <path d="M3 10h18M8 3v4M16 3v4" />
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="4" />
+    <path d="M5.6 5.6l3.6 3.6M14.8 14.8l3.6 3.6M18.4 5.6l-3.6 3.6M9.2 14.8l-3.6 3.6" />
   </Icon>
 );
 export const ScanIcon = (p: P) => (

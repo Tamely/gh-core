@@ -1,13 +1,20 @@
 import { Home } from "./pages/Home";
 import { NotFound, placeholder } from "./pages/Placeholder";
-import { Schedule } from "./pages/Schedule";
 import { Router, type Route } from "./router";
 import { TabBar } from "./ui/TabBar";
 
 // Paths reserved in handoffs/josh.md. Placeholders are replaced in later PRs.
 const routes: Route[] = [
   { path: "/", component: Home },
-  { path: "/schedule", component: Schedule },
+  // Home is the schedule now; keep the old path working for any saved links.
+  { path: "/schedule", component: Home },
+  {
+    path: "/help",
+    component: placeholder(
+      "Help",
+      "Drop a pin on the floor plan and a mentor comes to you. Arrives with the Map.",
+    ),
+  },
   {
     path: "/scan",
     component: placeholder("Scan", "Scanning arrives with the native app."),

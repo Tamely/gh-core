@@ -32,6 +32,34 @@ export function upNext(
     .slice(0, count);
 }
 
+/**
+ * Splits the schedule at `now`, both halves in start order. An item counts as
+ * past once it has ended; anything still running is upcoming.
+ */
+export function splitAtNow(
+  items: ScheduleItem[],
+  now: Date,
+): { past: ScheduleItem[]; upcoming: ScheduleItem[] } {
+  const t = now.getTime();
+  const sorted = [...items].sort(
+    (a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt),
+  );
+  return {
+    past: sorted.filter((item) => Date.parse(item.endsAt) <= t),
+    upcoming: sorted.filter((item) => Date.parse(item.endsAt) > t),
+  };
+}
+
+/** Labels the event day an item falls on, e.g. "Saturday, Feb 20". */
+export function dayLabel(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(iso));
+}
+
 /** Groups items by calendar day in the event's time zone, keeping start order. */
 export function groupByDay(
   items: ScheduleItem[],

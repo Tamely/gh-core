@@ -59,7 +59,7 @@ _Last updated: 2026-11-17_
 - **The web build never includes native plugins.** Every Capacitor plugin is imported on demand, only on native.
 
 ## Provides to others
-- **Reserved client routes** (unstable until 1.2 merges): `/`, `/schedule`, `/judge/:token`, `/auth/callback`, `/n/:short_id`, `/privacy`.
+- **Reserved client routes** (unstable until 1.2 merges): `/` (Home, which is also the schedule; `/schedule` still opens it), `/scan`, `/map`, `/battle`, `/help`, `/profile`, `/judge/:token`, `/auth/callback`, `/n/:short_id`, `/privacy`.
 - **Storage interface** (1.2): a key-value and table store with a web backend (IndexedDB) and a native backend (SQLite). The auth PR's token storage and the scanner's local scan queue should use it, or sit next to it, rather than adding a second storage layer.
 - **Client calls to the API are same-origin** (`/api/v1/...`). On native they use `Authorization: Bearer`; on web, cookies. This matches the auth ticket.
 - **Signing details for deep links** (1.6–1.7): the Apple Team ID and the SHA-256 fingerprint of the Android signing certificate, for the `.well-known` files.
