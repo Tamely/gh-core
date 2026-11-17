@@ -1,17 +1,18 @@
 import { For, type Component } from "solid-js";
 import { Link, pathname } from "../router";
-import { CalendarIcon, FlagIcon, HomeIcon, MapIcon, ScanIcon } from "./icons";
+import { FlagIcon, HelpIcon, HomeIcon, MapIcon, ScanIcon } from "./icons";
 
 const tabs: {
   href: string;
   label: string;
   icon: Component<{ size?: number }>;
 }[] = [
+  // Home is also the schedule, so there's no separate Schedule tab.
   { href: "/", label: "Home", icon: HomeIcon },
-  { href: "/schedule", label: "Schedule", icon: CalendarIcon },
   { href: "/scan", label: "Scan", icon: ScanIcon },
   { href: "/map", label: "Map", icon: MapIcon },
   { href: "/battle", label: "Battle", icon: FlagIcon },
+  { href: "/help", label: "Help", icon: HelpIcon },
 ];
 
 /** Floating liquid glass tab bar. Same five tabs in both themes (docs/design.md). */

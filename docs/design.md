@@ -46,8 +46,10 @@ The app should feel **modern, round and bouncy, like a native iOS app**, and car
   - **A long page before registration opens.** Until then, geauxhack.com is one screen with nothing to scroll, like HackMIT's between events: the hero, a "notify me" email field, and a sponsor contact line. The story, tracks, FAQ and sponsor sections appear when `REGISTRATION_OPEN` is set to true. There's no dates timeline.
   - **Middle-dot separators between words** ("PFT 1240 · in 12 min"). Write a phrase ("Starts in 12 min in PFT 1240") or split it into two elements.
   - **Lists of three in copy** ("purple, gold, the crown"). Say the one or two things that matter.
-- **Tabs, the same in both themes:** Home, Schedule, Scan, Map, Battle. Profile and the QR pass open from the avatar button at the top of Home.
-- **The Beau vs Parkeaux battle lives only on the Battle tab.** Home shows urgent alerts, the countdown and what's next.
+- **Tabs, the same in both themes:** Home, Scan, Map, Battle, Help. Profile and the QR pass open from the avatar button at the top of Home.
+- **Home is the schedule.** There is no separate Schedule tab. Home shows the whole weekend as one timeline with day labels. Once the event is under way, a gold "Now" line marks the present and earlier items fold away behind "Show earlier", so the next thing is always near the top. Urgent personal alerts (judging, on deck) go above the timeline.
+- **Help** is the mentor ticket queue: drop a pin on the floor plan with what you need, and a mentor comes to you.
+- **The Beau vs Parkeaux battle lives only on the Battle tab.** Home shows urgent alerts, the countdown and the schedule.
 - **Order screens by urgency:** anything that needs action now comes first (ON DECK and other judging alerts, then the hacking countdown), then what's next on the schedule. The Beau vs Parkeaux score only matters at the very end, so it sits below the alerts and countdown.
 - **No orange.** Parkeaux, alerts and "starts soon" use LSU gold.
 - **Battle card:** one card with both totals in ink (black), team names in their colors (Beau purple, Parkeaux gold), and a single split bar of Beau purple against Parkeaux gold. Same design in both themes.

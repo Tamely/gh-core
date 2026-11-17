@@ -1,8 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { sampleEvent, sampleSchedule } from "./sample";
-import { formatTime, groupByDay, hackingCountdown, upNext } from "./schedule";
+import {
+  dayLabel,
+  formatTime,
+  groupByDay,
+  hackingCountdown,
+  splitAtNow,
+  upNext,
+} from "./schedule";
 
 const tz = sampleEvent.timeZone;
+
+describe("splitAtNow", () => {
+  it("puts ended items in past and running or later items in upcoming", () => {
+    // The workshop runs 7:30 to 8:30, so at 7:45 it's still upcoming.
+    const { past, upcoming } = splitAtNow(
+      sampleSchedule,
+      new Date("2027-02-20T19:45:00-06:00"),
+    );
+    expect(past.map((item) => item.id)).toEqual([
+      "checkin",
+      "opening",
+      "lunch",
+    ]);
+    expect(upcoming[0]?.id).toBe("llm-agents");
+    expect(past.length + upcoming.length).toBe(sampleSchedule.length);
+  });
+});
+
+describe("dayLabel", () => {
+  it("uses the event's day, not UTC's", () => {
+    expect(dayLabel("2027-02-21T00:00:00-06:00", tz)).toBe("Sunday, Feb 21");
+  });
+});
 
 describe("upNext", () => {
   it("skips items that have ended and keeps start order", () => {
