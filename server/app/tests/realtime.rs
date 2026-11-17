@@ -690,3 +690,58 @@ async fn seq_survives_a_server_restart() {
     let (_, new) = instance(&redis).await;
     assert_eq!(publish(&new, "team:1", "t", json!(null)).await, 3);
 }
+
+#[tokio::test]
+async fn junk_on_an_event_channel_is_dropped_without_breaking_delivery() {
+    let redis = start_redis().await;
+    let (addr, state) = instance(&redis).await;
+    let mut client = Client::connect(&addr).await;
+    client.subscribe("room:1").await;
+
+    // Someone with Redis access publishes straight to the channel.
+    for junk in ["hello", "7", "1 not-json", r#"1 {"topic":"room:1"}"#] {
+        redis
+            .container
+            .exec(ExecCommand::new([
+                "redis-cli",
+                "PUBLISH",
+                "gh:events:room:1",
+                junk,
+            ]))
+            .await
+            .unwrap();
+    }
+    publish(&state, "room:1", "t", json!("real")).await;
+    let event = client.next_json().await;
+    assert_eq!(event["payload"], "real", "got {event}");
+}
+
+#[tokio::test]
+async fn publishing_recovers_after_redis_drops_the_connections() {
+    let redis = start_redis().await;
+    let (_, state) = instance(&redis).await;
+    redis
+        .container
+        .exec(ExecCommand::new([
+            "redis-cli",
+            "CLIENT",
+            "KILL",
+            "TYPE",
+            "normal",
+        ]))
+        .await
+        .unwrap();
+
+    let recovered = eventually(Duration::from_secs(10), || {
+        let state = state.clone();
+        async move {
+            state
+                .events
+                .publish(&Topic::parse("room:1").unwrap(), "t", &json!(null))
+                .await
+                .is_ok()
+        }
+    })
+    .await;
+    assert!(recovered, "publishing never recovered");
+}

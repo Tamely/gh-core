@@ -3,10 +3,22 @@
 
 mod common;
 
-use axum::http::StatusCode;
+use std::time::Duration;
+
+use axum::{Router, http::StatusCode};
 use common::*;
 use gh_server::{app, metrics, topic::Topic};
 use serde_json::json;
+use testcontainers_modules::testcontainers::core::ExecCommand;
+
+async fn page(internal: &Router) -> String {
+    let res = send(internal, "/metrics").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    String::from_utf8(body.to_vec()).unwrap()
+}
 
 #[tokio::test]
 async fn metrics_cover_http_pool_websockets_and_redis() {
@@ -34,12 +46,11 @@ async fn metrics_cover_http_pool_websockets_and_redis() {
         StatusCode::NOT_FOUND
     );
 
-    let res = send(&internal, "/metrics").await;
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let text = String::from_utf8(body.to_vec()).unwrap();
+    // Unknown paths share one label instead of adding a series per URL.
+    send(&public, "/rooms/12345").await;
+    send(&public, "/rooms/67890").await;
+
+    let text = page(&internal).await;
 
     for expected in [
         r#"http_request_duration_seconds_bucket{route="/healthz",status="200""#,
@@ -58,4 +69,37 @@ async fn metrics_cover_http_pool_websockets_and_redis() {
     ] {
         assert!(text.contains(expected), "missing {expected:?} in:\n{text}");
     }
+    assert!(text.contains(r#"route="unmatched",status="404""#), "{text}");
+    assert!(!text.contains("12345") && !text.contains("67890"), "{text}");
+
+    // A dropped Redis subscriber shows up as a reconnect and a resync.
+    redis
+        .container
+        .exec(ExecCommand::new([
+            "redis-cli",
+            "CLIENT",
+            "KILL",
+            "TYPE",
+            "pubsub",
+        ]))
+        .await
+        .unwrap();
+    assert_eq!(client.next_json().await["type"], "resync");
+    let text = page(&internal).await;
+    assert!(text.contains("redis_reconnects_total 1"), "{text}");
+    assert!(text.contains("ws_resyncs_total 1"), "{text}");
+    assert!(text.contains("redis_connected 1"), "{text}");
+
+    // When the client leaves, the gauges go back to zero.
+    drop(client);
+    let settled = eventually(Duration::from_secs(5), || async {
+        let text = page(&internal).await;
+        text.contains("ws_connections 0") && text.contains(r#"ws_subscriptions{kind="room"} 0"#)
+    })
+    .await;
+    assert!(
+        settled,
+        "gauges didn't return to zero:\n{}",
+        page(&internal).await
+    );
 }
