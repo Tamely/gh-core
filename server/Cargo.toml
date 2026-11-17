@@ -6,3 +6,11 @@ members = ["app", "bench"]
 lto = true
 codegen-units = 1
 strip = true
+
+# Dependencies' debug info filled several GB of target/ for little use;
+# our own code keeps line numbers for backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
