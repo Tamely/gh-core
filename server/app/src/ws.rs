@@ -165,8 +165,7 @@ async fn run(socket: WebSocket, state: AppState, identity: Identity) {
         };
         match message {
             Some(Ok(Message::Text(text))) => {
-                let reply = handle(&text, &state, &identity, &tx, &conn, &mut subscriptions);
-                if !conn.push(&tx, reply) {
+                if !handle(&text, &state, &identity, &tx, &conn, &mut subscriptions) {
                     break;
                 }
             }
@@ -215,6 +214,8 @@ enum Command {
     Unsubscribe { topic: String },
 }
 
+/// Handles one client command and queues the reply. Returns false when the
+/// connection is finished.
 fn handle(
     text: &str,
     state: &AppState,
@@ -222,14 +223,12 @@ fn handle(
     tx: &mpsc::Sender<Out>,
     conn: &Arc<Conn>,
     subscriptions: &mut HashMap<Topic, CancellationToken>,
-) -> Out {
+) -> bool {
     let command = match serde_json::from_str::<Command>(text) {
         Ok(command) => command,
         Err(_) => {
-            return error(
-                None,
-                "expected {\"op\":\"subscribe\"|\"unsubscribe\",\"topic\":...}",
-            );
+            let hint = "expected {\"op\":\"subscribe\"|\"unsubscribe\",\"topic\":...}";
+            return conn.push(tx, error(None, hint));
         }
     };
     let (op, name) = match &command {
@@ -238,19 +237,26 @@ fn handle(
     };
     let topic = match Topic::parse(name) {
         Ok(topic) => topic,
-        Err(reason) => return error(Some(name), reason),
+        Err(reason) => return conn.push(tx, error(Some(name), reason)),
     };
+    let reply = control(json!({ "type": op, "topic": topic.as_str() }));
 
     match command {
         Command::Subscribe { .. } if !subscriptions.contains_key(&topic) => {
             if subscriptions.len() >= MAX_SUBSCRIPTIONS {
-                return error(Some(name), "subscription limit reached");
+                return conn.push(tx, error(Some(name), "subscription limit reached"));
             }
             if !state.authorizer.can_subscribe(identity, &topic) {
-                return error(Some(name), "not allowed");
+                return conn.push(tx, error(Some(name), "not allowed"));
+            }
+            // Subscribe before queueing the reply so nothing published after
+            // the reply is missed, and queue the reply before forwarding
+            // starts so it always arrives before the topic's first event.
+            let rx = state.hub.subscribe(&topic);
+            if !conn.push(tx, reply) {
+                return false;
             }
             let stop = conn.closed.child_token();
-            let rx = state.hub.subscribe(&topic);
             tokio::spawn(forward(
                 topic.clone(),
                 rx,
@@ -259,16 +265,17 @@ fn handle(
                 stop.clone(),
                 state.clone(),
             ));
-            subscriptions.insert(topic.clone(), stop);
+            subscriptions.insert(topic, stop);
+            true
         }
-        Command::Subscribe { .. } => {} // already subscribed
+        Command::Subscribe { .. } => conn.push(tx, reply), // already subscribed
         Command::Unsubscribe { .. } => {
             if let Some(stop) = subscriptions.remove(&topic) {
                 stop.cancel();
             }
+            conn.push(tx, reply)
         }
     }
-    control(json!({ "type": op, "topic": topic.as_str() }))
 }
 
 /// Moves one topic's events into the connection's send queue.
