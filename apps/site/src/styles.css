@@ -35,13 +35,14 @@ html {
 }
 
 /* Once the drawing is in, the crown drops in from above and falls through the
-   pothole, once. It's never shown sitting still first: `both` keeps it hidden
-   during the delay. The pothole flashes as it goes through, then keeps a soft
-   glow, as if the portal is still open. */
+   pothole, then again every 4 seconds. The fall takes the first ~1.3s of each
+   cycle; the crown is hidden the rest of the time, so it's never shown sitting
+   still (`both` also keeps it hidden during the start delay). The pothole
+   flashes each time it goes through and glows softly in between. */
 .crown-drop {
   transform-box: fill-box;
   transform-origin: 50% 100%;
-  animation: crown-drop 1.3s 1.8s both;
+  animation: crown-drop 4s 1.8s infinite both;
 }
 @keyframes crown-drop {
   0% {
@@ -49,43 +50,35 @@ html {
     opacity: 0;
     animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
   }
-  8% {
+  2% {
     opacity: 1;
   }
-  78% {
+  25% {
     transform: translateY(30px) rotate(-8deg) scale(0.75, 0.6);
     opacity: 1;
   }
+  32%,
   100% {
     transform: translateY(40px) rotate(-8deg) scale(0.3, 0.1);
     opacity: 0;
   }
 }
 .pothole-glow {
-  opacity: 0;
+  opacity: 0.2;
   filter: blur(6px);
-  animation:
-    pothole-flash 1.2s 2.7s both,
-    pothole-breathe 4s 3.9s ease-in-out infinite;
+  animation: pothole-flash 4s 1.8s infinite both;
 }
 @keyframes pothole-flash {
-  0% {
-    opacity: 0;
+  0%,
+  24% {
+    opacity: 0.2;
   }
-  20% {
+  29% {
     opacity: 0.9;
   }
+  55%,
   100% {
-    opacity: 0.25;
-  }
-}
-@keyframes pothole-breathe {
-  0%,
-  100% {
-    opacity: 0.25;
-  }
-  50% {
-    opacity: 0.45;
+    opacity: 0.2;
   }
 }
 

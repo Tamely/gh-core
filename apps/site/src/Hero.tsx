@@ -15,7 +15,7 @@ const sky = stars(40, 7);
  * Full-screen and simple, after HackUTD's hero: one line of context, one
  * heading, and a line drawing of campus on Nicholson across the whole bottom
  * edge. Once it's drawn, Beau's crown drops in from above and falls through
- * the pothole, once. The pothole flashes gold and then keeps a soft glow.
+ * the pothole, then again every 4 seconds. The pothole flashes gold each time.
  * While registration is closed, the only action is HackMIT's "notify me".
  */
 export function Hero() {
