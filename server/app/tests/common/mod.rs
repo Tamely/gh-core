@@ -80,6 +80,14 @@ pub async fn migrated_pool(db: &TestDb, max_connections: u32) -> PgPool {
         .unwrap()
 }
 
+/// A migrated database and a pool without the production timeouts, for tests
+/// about the schema rather than the pool. A busy machine starting many test
+/// containers can push a query past the 2s limit and make them flaky.
+pub async fn schema_pool(db: &TestDb) -> PgPool {
+    db::migrate(&db.url).await.unwrap();
+    PgPool::connect(&db.url).await.unwrap()
+}
+
 /// A pool that never connects; fine for tests that don't touch Postgres.
 pub fn offline_pool() -> PgPool {
     PgPoolOptions::new()

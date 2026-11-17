@@ -70,7 +70,7 @@ async fn two_instances_migrating_at_once_both_succeed() {
 #[tokio::test]
 async fn face_embedding_accepts_512_dimensions_only() {
     let db = start_postgres().await;
-    let pool = migrated_pool(&db, 2).await;
+    let pool = schema_pool(&db).await;
     let insert =
         "INSERT INTO users (email, phone_e164, full_name, school, qr_hmac_sig, face_embedding)
                   VALUES ($1, '+15555550100', 'Test', 'LSU', '\\x00', $2::vector)";
@@ -95,7 +95,7 @@ async fn face_embedding_accepts_512_dimensions_only() {
 #[tokio::test]
 async fn queue_positions_can_be_swapped_but_not_duplicated() {
     let db = start_postgres().await;
-    let pool = migrated_pool(&db, 2).await;
+    let pool = schema_pool(&db).await;
     sqlx::raw_sql(
         "INSERT INTO presentation_rooms VALUES ('PFT-1200', 'GENERAL', 1, 0, 0, 'token');
          INSERT INTO teams (id, name) VALUES
