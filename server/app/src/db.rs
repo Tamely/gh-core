@@ -27,6 +27,17 @@ pub async fn connect(config: &Config) -> Result<PgPool, sqlx::Error> {
         .await
 }
 
+/// A one-connection pool, separate from `pool`, for `/readyz`. Readiness asks
+/// "can this instance reach Postgres?", not "is the pool busy?". If a burst
+/// fills the main pool, every instance would otherwise report not ready at
+/// once and the load balancer could take them all out.
+pub fn health_pool(pool: &PgPool) -> PgPool {
+    PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(crate::READY_CHECK_TIMEOUT)
+        .connect_lazy_with((*pool.connect_options()).clone())
+}
+
 /// Takes a connection from the pool. Handlers should acquire through this so
 /// the `db_pool_waiting` metric counts them while they wait.
 pub async fn acquire(pool: &PgPool) -> Result<PoolConnection<Postgres>, sqlx::Error> {

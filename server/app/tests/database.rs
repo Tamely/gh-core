@@ -205,7 +205,7 @@ fn test_app(state: AppState) -> Router {
 }
 
 #[tokio::test]
-async fn exhausted_pool_answers_503_within_two_seconds_and_recovers() {
+async fn exhausted_pool_answers_503_stays_ready_and_recovers() {
     const MAX: u32 = 4;
     let (db, redis) = tokio::join!(start_postgres(), start_redis());
     let app = test_app(state(migrated_pool(&db, MAX).await, &redis.url).await);
@@ -220,6 +220,13 @@ async fn exhausted_pool_answers_503_within_two_seconds_and_recovers() {
             })
         })
         .collect();
+
+    // While the pool is saturated the instance is busy, not broken: it must
+    // stay ready so the load balancer doesn't pull every instance at once.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let ready_at = Instant::now();
+    assert_eq!(send(&app, "/readyz").await.status(), StatusCode::OK);
+    assert!(ready_at.elapsed() < Duration::from_millis(500));
 
     // Most requests give up waiting for a connection at 2s. A request that
     // gets a connection right at 2s can still run until the 3s request

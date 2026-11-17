@@ -42,6 +42,8 @@ pub const READY_CHECK_TIMEOUT: Duration = Duration::from_millis(500);
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    /// Used only by `/readyz`; see [`db::health_pool`].
+    pub health_db: PgPool,
     pub events: events::Events,
     pub hub: Arc<hub::Hub>,
     pub authorizer: Arc<dyn auth::Authorizer>,
@@ -102,14 +104,14 @@ async fn add_retry_after(mut res: Response) -> Response {
 }
 
 /// 200 when this instance should get traffic: not shutting down, and both
-/// Postgres and Redis answer within the check timeout.
+/// Postgres and Redis answer within the check timeout. A busy pool doesn't
+/// make it fail: overload is answered with 503s on the requests themselves.
 async fn readyz(State(state): State<AppState>) -> StatusCode {
     if state.shutdown.is_cancelled() {
         return StatusCode::SERVICE_UNAVAILABLE;
     }
     let postgres = async {
-        let mut conn = db::acquire(&state.db).await?;
-        sqlx::query("SELECT 1").execute(&mut *conn).await?;
+        sqlx::query("SELECT 1").execute(&state.health_db).await?;
         Ok::<_, sqlx::Error>(())
     };
     let checks = async { tokio::join!(postgres, state.events.ping()) };

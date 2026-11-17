@@ -68,6 +68,7 @@ async fn main() {
 
     let state = AppState {
         db: pool.clone(),
+        health_db: db::health_pool(&pool),
         events,
         hub,
         authorizer: Arc::new(AllowAll),

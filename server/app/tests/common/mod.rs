@@ -103,6 +103,7 @@ pub async fn state(pool: PgPool, redis_url: &str) -> AppState {
     // The subscriber stops when dropped; keep it for the life of the test.
     std::mem::forget(subscriber);
     AppState {
+        health_db: db::health_pool(&pool),
         db: pool,
         events,
         hub,
