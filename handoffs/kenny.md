@@ -1,6 +1,6 @@
 # Kenny: handoff
 
-_Last updated: 2026-11-17_
+_Last updated: 2026-11-18_
 
 ## Owns
 **Backend monolith (Rust, Axum)** in `server/`: HTTP API, Postgres pool and migrations, Redis pub/sub, WebSocket hub, health and metrics, the static release image, the load-test tool and their CI.
@@ -35,7 +35,13 @@ Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machin
 
 Test flake: `queue_positions_can_be_swapped_but_not_duplicated` failed once in about 15 full runs and couldn't be reproduced. Schema tests now use a plain pool instead of the 2s production limits, and CI runs 4 tests at a time. Heavier stress (30 containers at once) only produced container startup timeouts.
 
-Not started: Josh's backend requests (application API, team pick endpoint with the 52% cap, schedule and profile shapes). The live team split needs one more topic kind (e.g. a single `event:split` topic); adding a kind is a few lines in `server/app/src/topic.rs`.
+Not started: Josh's backend requests, as of his 2026-11-17 handoff on the `landing-page` branch:
+- `POST /api/v1/notify` taking `{ "email" }`, stored for the "registration is open" email, CORS allowing `https://geauxhack.com` (the landing page posts to it cross-origin). Needs a table, a CORS layer and basic abuse limits.
+- A schedule endpoint returning `EventInfo` and `ScheduleItem[]` from `apps/client/src/schedule/types.ts`.
+- A current-user profile with `firstName` and `team` (needs auth).
+- The application API, and the team pick endpoint with the 52% cap. The live team split needs one more topic kind (e.g. `event:split`), a few lines in `server/app/src/topic.rs`.
+
+Checked against Josh's three draft branches (2026-11-18): all merge cleanly with `kenny/server-edge-cases`, and their client CI passes on the merge except Prettier, which flags `server/README.md` (see Needs from others). The production domain is now `app.geauxhack.com` (was `.org`), and the placeholder event dates are Feb 20-21, 2027.
 
 ## Decisions
 - **`seq` is assigned in Redis** by a Lua script (`INCR gh:seq:{topic}` then `PUBLISH`, atomically). Every instance forwards the same number, so a client that reconnects to another instance can still detect gaps, and two publishers can't reorder events.
@@ -72,6 +78,7 @@ Not started: Josh's backend requests (application API, team pick endpoint with t
 ## Needs from others
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
+| josh | Either add `server/` to `.prettierignore`, or confirm the backend should follow Prettier for its Markdown and YAML. Your CI runs `prettier --check .` on every PR with no path filter, and `server/README.md` fails it, so each backend PR would fail your check once it's on `main`. | Backend PRs passing CI | before PR 1.1 merges |
 | infra | Container stop grace period of at least 20s, the load balancer polling `/readyz`, `/api/v1/ws` routed with WebSocket upgrades, port 9090 kept internal | Zero-downtime deploys; 15s drain | before the January mock run |
 | database | Schema gaps in design doc §5: a team membership table, `sponsor_keys`, a table for photo face embeddings, and loan history in `hardware_loans` | Later backend PRs (auth, scanning) | 2026-11-24 |
 | auth | Replace `auth::AllowAll` with real rules. Browsers can't set headers on a WebSocket, so web uses the cookie and native needs a token another way (query param or first message). Cookie auth also needs an `Origin` check on the upgrade. | Live updates are open to anyone until then | with the auth PR |
