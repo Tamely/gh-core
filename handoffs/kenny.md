@@ -1,12 +1,12 @@
 # Kenny: handoff
 
-_Last updated: 2026-11-18_
+_Last updated: 2026-11-19_
 
 ## Owns
 **Backend monolith (Rust, Axum)** in `server/`: HTTP API, Postgres pool and migrations, Redis pub/sub, WebSocket hub, health and metrics, the static release image, the load-test tool and their CI.
 
 ## Status
-Four stacked branches, local only, not pushed yet. Each builds on the one before:
+Six stacked branches, local only, not pushed yet. Each builds on the one before:
 
 | Branch | Scope | State |
 |---|---|---|
@@ -18,6 +18,15 @@ Four stacked branches, local only, not pushed yet. Each builds on the one before
 | `kenny/server-edge-cases` | Redis command timeout and bigger buffers (bursts no longer cause resyncs), startup checks (URL schemes, port 0, 10s Postgres connect limit), tests that run the real binary, 25 more edge-case tests | done |
 
 PR descriptions are drafted in `pr-drafts/` (not committed).
+
+**Ready to PR (checked 2026-11-19).** `origin/main` hasn't moved since the stack started, so all six branches apply cleanly on it. 82 tests passed three runs in a row. Open them as six stacked PRs, reviewed and merged in order (skeleton → database → realtime → bench → hardening → edge cases). Not verified yet: CI has never run on GitHub, so expect one round of fixes after the first push.
+
+What's built is the foundation: startup checks, migrations, health and metrics, the live-update WebSocket server, graceful shutdown and the load-test tool. No login and no event features yet (applications, teams, judging, notify).
+
+Open decisions:
+- **Prettier** (with Josh, see Needs from others). The README only fails on spacing: Prettier pads Markdown tables so the columns line up and evens out blank lines in lists. The rendered page is identical. If Josh doesn't answer, run Prettier on `server/README.md` before PR 1 instead of waiting.
+- **What to build next:** `POST /api/v1/notify` (the landing page needs it soonest) or auth (everything else needs it).
+- **Hosting:** the team leans AWS; cost and ping from Baton Rouge are still being argued. Doesn't block the PRs.
 
 Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machine, 1,000 clients over 25 rooms, 250 teams, 10 mentor tags, 100 events/s):
 - 10-minute run: 0 dropped, 0 errors, 2,175,040/2,175,040 deliveries, 0 `seq` gaps.
@@ -46,7 +55,7 @@ Checked against Josh's three draft branches (2026-11-18): all merge cleanly with
 ## Decisions
 - **`seq` is assigned in Redis** by a Lua script (`INCR gh:seq:{topic}` then `PUBLISH`, atomically). Every instance forwards the same number, so a client that reconnects to another instance can still detect gaps, and two publishers can't reorder events.
 - **After a Redis reconnect every client gets `resync`.** Pub/sub keeps nothing, so events during the outage are gone.
-- **Slow clients:** each connection has a 64-message queue. At half full the client gets `resync`; when full it's closed with 1013. Queued control messages (`resync`) are still sent before the close frame; queued events are dropped.
+- **Slow clients:** each connection has a 512-message queue (was 64, see "Bursts" below). At half full the client gets `resync`; when full it's closed with 1013. Queued control messages (`resync`) are still sent before the close frame; queued events are dropped.
 - **Closing handshake:** after sending a close frame the server waits (up to 1s) for the client's reply before dropping the socket. Dropping it first reset the connection and made clients lose the close code.
 - **`TCP_NODELAY` on every accepted socket.** Without it, back-to-back messages to one client waited up to 40ms for a delayed ACK (p99 went from 24ms to 2.6ms).
 - **Metrics upkeep runs every 5s.** The Prometheus exporter keeps raw histogram samples until upkeep; without it memory grew about 7MB a minute when nothing scraped `/metrics`.
