@@ -79,7 +79,9 @@ fn missing_settings_exit_1_listing_every_problem() {
     let logs = logs(&output);
     assert!(logs.contains("DATABASE_URL is required"), "{logs}");
     assert!(logs.contains("REDIS_URL is required"), "{logs}");
-    assert!(took < Duration::from_secs(2), "{took:?}");
+    // Prompt exit, not a hang. Loose because Windows scans a freshly built
+    // binary on its first run (2.03s seen).
+    assert!(took < Duration::from_secs(5), "{took:?}");
 }
 
 #[test]
