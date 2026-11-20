@@ -47,3 +47,36 @@ jobs:
 
       - name: Bundle budget (initial shell under 35KB gzipped)
         run: pnpm budget
+
+  android:
+    # Proves the Capacitor Android project builds. iOS builds on Josh's Mac
+    # through Xcode (docs/native.md), since it needs macOS.
+    name: Android debug build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # Capacitor 8 compiles with Java 21. The runner already has the Android SDK.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the web app and copy it into the Android project
+        working-directory: apps/client
+        run: pnpm build && pnpm exec cap sync android
+
+      - name: Assemble the debug APK
+        working-directory: apps/client/android
+        run: ./gradlew assembleDebug --no-daemon

@@ -8,14 +8,25 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
-    "budget": "node scripts/check-budget.mjs"
+    "budget": "node scripts/check-budget.mjs",
+    "cap:sync": "vite build && cap sync",
+    "ios": "vite build && cap sync ios && cap open ios",
+    "android": "vite build && cap sync android && cap open android",
+    "assets": "capacitor-assets generate --ios --android"
   },
   "dependencies": {
+    "@capacitor-community/sqlite": "8.1.1",
+    "@capacitor/android": "8.6.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/haptics": "8.0.2",
+    "@capacitor/ios": "8.6.2",
     "idb-keyval": "6.3.0",
     "solid-js": "1.9.19",
     "@gh-core/brand": "workspace:*"
   },
   "devDependencies": {
+    "@capacitor/assets": "4.0.0",
+    "@capacitor/cli": "8.6.2",
     "@solidjs/testing-library": "0.8.10",
     "@tailwindcss/vite": "4.3.5",
     "@types/node": "24.19.2",

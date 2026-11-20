@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Geaux Hack</string>
+    <string name="title_activity_main">Geaux Hack</string>
+    <string name="package_name">com.geauxhack.app</string>
+    <string name="custom_url_scheme">com.geauxhack.app</string>
+</resources>

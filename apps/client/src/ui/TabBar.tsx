@@ -1,4 +1,5 @@
 import { For, type Component } from "solid-js";
+import { tapFeedback } from "../haptics";
 import { Link, pathname } from "../router";
 import { FlagIcon, HelpIcon, HomeIcon, MapIcon, ScanIcon } from "./icons";
 
@@ -30,6 +31,7 @@ export function TabBar() {
               href={tab.href}
               aria-label={tab.label}
               aria-current={active() ? "page" : undefined}
+              onNavigate={tapFeedback}
               class={`press flex size-[52px] items-center justify-center rounded-full ${
                 active()
                   ? "bg-beau/14 text-beau dark:bg-beau-glow/22 dark:text-beau-glow"
