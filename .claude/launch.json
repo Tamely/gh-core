@@ -19,6 +19,19 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@gh-core/site", "dev", "--strictPort"],
       "port": 5174
+    },
+    {
+      "name": "client-preview",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@gh-core/client",
+        "preview",
+        "--port",
+        "4173",
+        "--strictPort"
+      ],
+      "port": 4173
     }
   ]
 }

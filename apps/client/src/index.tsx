@@ -21,4 +21,10 @@ if (isNative()) {
     (globalThis as { ghClearStartups?: () => void }).ghClearStartups =
       clearStartups;
   });
+} else if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  // On the web, the service worker (src/sw.ts) makes the app work offline after
+  // the first visit. Registered after load so it never competes with first paint.
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js");
+  });
 }
