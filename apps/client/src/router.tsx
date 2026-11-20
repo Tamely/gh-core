@@ -65,6 +65,8 @@ type LinkProps = {
   class?: string;
   "aria-label"?: string;
   "aria-current"?: "page" | undefined;
+  /** Runs before an in-app navigation (used for haptics). */
+  onNavigate?: () => void;
   children?: JSX.Element;
 };
 
@@ -83,6 +85,7 @@ export function Link(props: LinkProps) {
       return;
     }
     event.preventDefault();
+    props.onNavigate?.();
     navigate(props.href);
   };
   return (

@@ -1,42 +1,46 @@
 # Josh: handoff
 
-_Last updated: 2026-11-17_
+_Last updated: 2026-11-19_
 
 ## Owns
 **PR 1 series: client shell.** The SolidJS PWA at `apps/client/` and its Capacitor iOS/Android wrapper: offline shell, PWA, native plugins, store builds, OTA updates.
 
 ## Status
-Three stacked draft PRs; merge them in order:
+Four stacked draft PRs. Merge them in order; each targets the one before it.
 
-- **PR 1.1 (scaffold):** https://github.com/Tamely/gh-core/pull/1, targeting `main`.
-- **PR 1.2 (app shell):** https://github.com/Tamely/gh-core/pull/2, targeting `pr-1.1-scaffold`.
-  - Contents: theme, Allo, the custom router, storage, five glass tabs, and Home and Schedule from sample data.
-  - Home and Schedule were reworked away from stacked cards: the countdown is type on the page, Up next is a timeline, and Schedule is a divided list with sticky day headers.
-  - All checks pass (16 tests). The initial shell is 14.09KB gzipped.
-- **Landing page:** https://github.com/Tamely/gh-core/pull/3, targeting `pr-1.2-app-shell`.
-  - New `apps/site`, the public site for `geauxhack.com`.
-  - Until registration opens it's one screen, like HackMIT's: a full-screen hero (as simple as HackUTD's, with the crown dropping into the pothole every 4s), a notify-me field and a sponsor line.
-  - The story, Beau vs. Parkeaux split, District rows, FAQ and sponsor band appear when `REGISTRATION_OPEN` is true. No cards.
-  - New `packages/brand` holds the theme CSS shared by the app and the site.
-- **Design:** [`docs/design.md`](../docs/design.md). The style canvas (link under Decisions) now matches the code, with Home, Schedule and the landing hero.
+1. **PR 1.1 (scaffold):** https://github.com/Tamely/gh-core/pull/1, targeting `main`.
+2. **PR 1.2 (app shell):** https://github.com/Tamely/gh-core/pull/2.
+   - Theme, Allo, the custom router, storage, glass tab bar.
+   - Home is the schedule: the whole weekend as one timeline with a Now line during the event. Tabs are Home, Scan, Map, Battle, Help.
+3. **Landing page:** https://github.com/Tamely/gh-core/pull/3. `apps/site` for `geauxhack.com` (one screen with a notify-me field until registration opens) and `packages/brand`.
+4. **PR 1.4 (Capacitor):** branch `pr-1.4-capacitor`, stacked on the landing page.
+   - Capacitor 8.6.2 iOS and Android projects (`com.geauxhack.app`), SQLite storage on native, haptics on tab switches, launch-time logging, placeholder icon and splash. CI builds an Android debug APK.
+   - **Not verified yet:** the iOS build (needs Josh's Mac), the Android build (first runs in CI on this PR), and the under-100ms offline startup on physical phones. How to do all three is in [`docs/native.md`](../docs/native.md).
+
+Initial shell: 15.35KB gzipped (44% of budget). Design: [`docs/design.md`](../docs/design.md).
 
 ### PR plan
-| PR | Scope | Blocked on |
+| PR | Scope | State / blocked on |
 |---|---|---|
-| 1.1 Scaffold | pnpm workspace, `apps/client` (SolidJS, Vite, strict TypeScript, Tailwind v4), lint/format, CI (lint, type-check, test, build), bundle budget: **initial shell JS + CSS under 35KB gzipped** | none (in review) |
-| 1.2 App shell | Small custom router (measured against `@solidjs/router`), navigation, schedule from bundled sample data, storage interface (IndexedDB on web, `localStorage` snapshot for the first render), `shell:rendered` performance mark, design tokens | none (in progress) |
-| 1.3 PWA | Workbox service worker (`vite-plugin-pwa`, `injectManifest`), manifest and maskable icons, offline fallback, Lighthouse CI (Performance ≥ 95, Accessibility and Best Practices = 100), installability check | none |
-| 1.4 Capacitor | iOS and Android projects, `com.geauxhack.app`, icons and splash, native SQLite storage backend, plugins loaded on demand (only on native), haptics, offline cold-start measurement on physical devices (under 100ms, Airplane Mode) | none |
+| 1.1 Scaffold | pnpm workspace, `apps/client`, lint/format, CI, 35KB bundle budget | Draft #1 |
+| 1.2 App shell | Router, navigation, Home timeline from sample data, storage interface, `shell:rendered` mark, theme | Draft #2 |
+| Landing page | `apps/site` for `geauxhack.com`, sharing `packages/brand` | Draft #3. Needs infra: hosting for `geauxhack.com`; ops: real dates and a sponsor email |
+| 1.4 Capacitor | iOS and Android projects, icons and splash, native SQLite, plugins loaded on demand, haptics, offline cold-start measurement | Draft. Needs Josh: the iOS build and the phone measurements |
+| 1.3 PWA | Workbox service worker (`vite-plugin-pwa`, `injectManifest`), manifest and maskable icons, offline fallback, Lighthouse CI (Performance ≥ 95, Accessibility and Best Practices = 100), installability check | Not started; nothing blocking |
 | 1.5 Scanner + push | `@capacitor-mlkit/barcode-scanning` (camera permissions), `@capacitor/push-notifications` (APNs key, Firebase `google-services.json`, secrets kept out of git) | ops: Apple Developer account, Firebase project |
-| 1.6 Store builds | fastlane `ios beta` (local Mac) and `android beta`, signing set up, TestFlight and Play Closed Testing live on physical devices | ops: store accounts, 12 testers |
+| 1.6 Store builds | fastlane `ios beta` (local Mac) and `android beta`, signing, TestFlight and Play Closed Testing live on physical devices | ops: store accounts, 12 testers. **The Play 14-day clock must start by 2026-12-15.** |
 | 1.7 Deep links | Associated Domains / App Links for `app.geauxhack.com` (`/judge/:token`, `/auth/callback`, `/n/:id`) | infra: hosting the `.well-known` files |
-| 1.9 Registration UI | HackMIT-style application lifecycle: public timeline, multi-step application saved as drafts, status card, confirmation (RSVP). See `docs/design.md`. | auth: sign-in; backend: application API |
-| Landing page | `apps/site` for `geauxhack.com`, sharing `packages/brand` with the app | infra: hosting for `geauxhack.com`; ops: real dates and a sponsor email |
 | 1.8 OTA | `@capgo/capacitor-updater` self-hosted: signed bundles, `manifest.json` with minimum native version, update check on foreground, rollback via `notifyAppReady()`, CI publishing step. Built and tested against a local server first. | infra: CDN bucket for the production setup |
+| 1.9 Registration UI | HackMIT-style application lifecycle: multi-step application saved as drafts, status, confirmation (RSVP). See `docs/design.md`. | auth: sign-in; backend: application API |
 
 ## Decisions
 - **SolidJS**, chosen over Preact for the smallest runtime and no virtual DOM.
 - **Capacitor: latest stable major.** Not 6: its Android target SDK is below Google Play's current requirement.
+  - **PR 1.4 uses Capacitor 8.6.2.** Android targets SDK 36 with Java 21; iOS uses Swift Package Manager (no CocoaPods).
+  - **The web bundle never imports `@capacitor/core`.** `src/platform.ts` detects the native shell by reading `window.Capacitor`, and every plugin is a dynamic import behind `isNative()`. Adding a native feature? Follow `src/haptics.ts`.
+  - **Launch times are logged on the device** (`src/startup.ts`), so 10 cold starts can be read in one go from the inspector. The steps are in `docs/native.md`.
+  - **Icon and splash are placeholders** (gold crown on Beau purple) until the art arrives; `pnpm --filter @gh-core/client assets` regenerates every size.
+  - **Native Liquid Glass on iOS 26 is deferred** until the app is on TestFlight and the CSS version can be judged on a real iPhone.
 - **App ID / bundle ID: `com.geauxhack.app`.** It can't be changed after the first store upload.
 - **Production domain: `app.geauxhack.com`.**
 - **Router: custom, in `apps/client/src/router.tsx`.** Measured 2026-11-17 by building the same three-route test app three ways (gzip level 9):

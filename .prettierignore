@@ -5,3 +5,5 @@ handoffs/
 docs/
 AGENTS.md
 CLAUDE.md
+apps/client/android/
+apps/client/ios/
