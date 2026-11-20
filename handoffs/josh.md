@@ -13,7 +13,7 @@ Four stacked draft PRs. Merge them in order; each targets the one before it.
    - Theme, Allo, the custom router, storage, glass tab bar.
    - Home is the schedule: the whole weekend as one timeline with a Now line during the event. Tabs are Home, Scan, Map, Battle, Help.
 3. **Landing page:** https://github.com/Tamely/gh-core/pull/3. `apps/site` for `geauxhack.com` (one screen with a notify-me field until registration opens) and `packages/brand`.
-4. **PR 1.4 (Capacitor):** branch `pr-1.4-capacitor`, stacked on the landing page.
+4. **PR 1.4 (Capacitor):** https://github.com/Tamely/gh-core/pull/5, stacked on the landing page.
    - Capacitor 8.6.2 iOS and Android projects (`com.geauxhack.app`), SQLite storage on native, haptics on tab switches, launch-time logging, placeholder icon and splash. CI builds an Android debug APK.
    - **Not verified yet:** the iOS build (needs Josh's Mac), the Android build (first runs in CI on this PR), and the under-100ms offline startup on physical phones. How to do all three is in [`docs/native.md`](../docs/native.md).
 
@@ -25,7 +25,7 @@ Initial shell: 15.35KB gzipped (44% of budget). Design: [`docs/design.md`](../do
 | 1.1 Scaffold | pnpm workspace, `apps/client`, lint/format, CI, 35KB bundle budget | Draft #1 |
 | 1.2 App shell | Router, navigation, Home timeline from sample data, storage interface, `shell:rendered` mark, theme | Draft #2 |
 | Landing page | `apps/site` for `geauxhack.com`, sharing `packages/brand` | Draft #3. Needs infra: hosting for `geauxhack.com`; ops: real dates and a sponsor email |
-| 1.4 Capacitor | iOS and Android projects, icons and splash, native SQLite, plugins loaded on demand, haptics, offline cold-start measurement | Draft. Needs Josh: the iOS build and the phone measurements |
+| 1.4 Capacitor | iOS and Android projects, icons and splash, native SQLite, plugins loaded on demand, haptics, offline cold-start measurement | Draft #5. Needs Josh: the iOS build and the phone measurements |
 | 1.3 PWA | Workbox service worker (`vite-plugin-pwa`, `injectManifest`), manifest and maskable icons, offline fallback, Lighthouse CI (Performance ≥ 95, Accessibility and Best Practices = 100), installability check | Not started; nothing blocking |
 | 1.5 Scanner + push | `@capacitor-mlkit/barcode-scanning` (camera permissions), `@capacitor/push-notifications` (APNs key, Firebase `google-services.json`, secrets kept out of git) | ops: Apple Developer account, Firebase project |
 | 1.6 Store builds | fastlane `ios beta` (local Mac) and `android beta`, signing, TestFlight and Play Closed Testing live on physical devices | ops: store accounts, 12 testers. **The Play 14-day clock must start by 2026-12-15.** |
