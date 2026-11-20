@@ -16,7 +16,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "budget": "pnpm --filter @gh-core/client budget",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm budget"
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build && pnpm budget && pnpm pwa:check",
+    "pwa:check": "pnpm --filter @gh-core/client pwa:check"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

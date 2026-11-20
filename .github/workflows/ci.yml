@@ -48,6 +48,42 @@ jobs:
       - name: Bundle budget (initial shell under 35KB gzipped)
         run: pnpm budget
 
+      - name: PWA check (installable, precached for offline)
+        run: pnpm pwa:check
+
+  lighthouse:
+    # Performance >= 95, Accessibility = 100, Best Practices = 100 on the built
+    # app (apps/client/lighthouserc.json). Reports are attached to the run.
+    name: Lighthouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm --filter @gh-core/client build
+
+      - name: Lighthouse CI
+        working-directory: apps/client
+        run: pnpm lighthouse
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lighthouse-reports
+          path: apps/client/.lighthouseci/reports
+          if-no-files-found: ignore
+
   android:
     # Proves the Capacitor Android project builds. iOS builds on Josh's Mac
     # through Xcode (docs/native.md), since it needs macOS.
