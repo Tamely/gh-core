@@ -1,6 +1,6 @@
 # Kenny: handoff
 
-_Last updated: 2026-11-19_
+_Last updated: 2026-11-21_
 
 ## Owns
 **Backend monolith (Rust, Axum)** in `server/`: HTTP API, Postgres pool and migrations, Redis pub/sub, WebSocket hub, health and metrics, the static release image, the load-test tool and their CI.
@@ -19,14 +19,21 @@ Six stacked branches, local only, not pushed yet. Each builds on the one before:
 
 PR descriptions are drafted in `pr-drafts/` (not committed).
 
-**Ready to PR (checked 2026-11-19).** `origin/main` hasn't moved since the stack started, so all six branches apply cleanly on it. 82 tests passed three runs in a row. Open them as six stacked PRs, reviewed and merged in order (skeleton → database → realtime → bench → hardening → edge cases). Not verified yet: CI has never run on GitHub, so expect one round of fixes after the first push.
+**Waiting on auth (decided 2026-11-20).** All five auth PRs (Ricky, starting with Tamely/gh-core#7) land on `main` first; this stack is then rebased onto them and opened as six stacked PRs, merged in order. I don't have write access to Tamely/gh-core yet (PR #4 came from my fork), and stacked PRs need it. Pushing needs that access. CI has never run on GitHub, so expect one round of fixes after the first push. Locally the timing tests sometimes fail when the laptop's Docker VM stalls for ~1.5s (whole run 25s instead of 12s); two bounds were loosened for real margin problems, the rest are left strict.
 
-What's built is the foundation: startup checks, migrations, health and metrics, the live-update WebSocket server, graceful shutdown and the load-test tool. No login and no event features yet (applications, teams, judging, notify).
+What's built is the foundation: startup checks, migrations, health and metrics, the live-update WebSocket server, graceful shutdown and the load-test tool. No login and no event features yet.
 
-Open decisions:
-- **Prettier** (with Josh, see Needs from others). The README only fails on spacing: Prettier pads Markdown tables so the columns line up and evens out blank lines in lists. The rendered page is identical. If Josh doesn't answer, run Prettier on `server/README.md` before PR 1 instead of waiting.
-- **What to build next:** `POST /api/v1/notify` (the landing page needs it soonest) or auth (everything else needs it).
-- **Hosting:** the team leans AWS; cost and ping from Baton Rouge are still being argued. Doesn't block the PRs.
+**Next: `POST /api/v1/notify`** (assigned in Ricky's handoff), on `kenny/notify` on top of this stack.
+
+**Rebase onto auth, accepted from `handoffs/ricky.md`:**
+- Use auth's `server/Cargo.toml`, `server/docker-compose.yml` and `server/migrations/` (moving mine from `server/app/migrations/`). My schema becomes `0002` and ALTERs auth's `users` instead of creating it.
+- `users.phone_e164`, `full_name`, `school`, `qr_hmac_sig` become nullable (a first OAuth or email-code sign-in has none of them). Before auth PR 2.
+- `presentation_rooms`: auth PR 4 creates a minimal table; my migration adds the rest and stores a judge token hash and version plus a judging window instead of `panel_hmac_token` (the raw token). Before auth PR 4.
+- Wire `AuthState` (shared pool and fred client), `sessions.reload(now)` at startup, `auth::routes`, a policy for each route, `.layer(auth::layer)` last, and auth's WebSocket checks instead of `AllowAll`. The fred client already has the 1s command timeout auth needs.
+
+Decided by the team:
+- **Hosting:** one DigitalOcean droplet runs the API, Postgres and Redis together over `127.0.0.1` (Ricky sets it up). Not AWS or Neon.
+- **Prettier** is still open (with Josh, see Needs from others). The README only fails on spacing (Prettier pads Markdown tables and evens out blank lines in lists). If Josh doesn't answer, run Prettier on `server/README.md` instead of waiting.
 
 Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machine, 1,000 clients over 25 rooms, 250 teams, 10 mentor tags, 100 events/s):
 - 10-minute run: 0 dropped, 0 errors, 2,175,040/2,175,040 deliveries, 0 `seq` gaps.
@@ -44,8 +51,8 @@ Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machin
 
 Test flake: `queue_positions_can_be_swapped_but_not_duplicated` failed once in about 15 full runs and couldn't be reproduced. Schema tests now use a plain pool instead of the 2s production limits, and CI runs 4 tests at a time. Heavier stress (30 containers at once) only produced container startup timeouts.
 
-Not started: Josh's backend requests, as of his 2026-11-17 handoff on the `landing-page` branch:
-- `POST /api/v1/notify` taking `{ "email" }`, stored for the "registration is open" email, CORS allowing `https://geauxhack.com` (the landing page posts to it cross-origin). Needs a table, a CORS layer and basic abuse limits.
+Josh's backend requests, as of his 2026-11-17 handoff on the `landing-page` branch:
+- In progress: `POST /api/v1/notify` taking `{ "email" }`, stored for the "registration is open" email, CORS allowing `https://geauxhack.com` (the landing page posts to it cross-origin). Needs a table, a CORS layer and basic abuse limits.
 - A schedule endpoint returning `EventInfo` and `ScheduleItem[]` from `apps/client/src/schedule/types.ts`.
 - A current-user profile with `firstName` and `team` (needs auth).
 - The application API, and the team pick endpoint with the 52% cap. The live team split needs one more topic kind (e.g. `event:split`), a few lines in `server/app/src/topic.rs`.
@@ -90,7 +97,7 @@ Checked against Josh's three draft branches (2026-11-18): all merge cleanly with
 | josh | Either add `server/` to `.prettierignore`, or confirm the backend should follow Prettier for its Markdown and YAML. Your CI runs `prettier --check .` on every PR with no path filter, and `server/README.md` fails it, so each backend PR would fail your check once it's on `main`. | Backend PRs passing CI | before PR 1.1 merges |
 | infra | Container stop grace period of at least 20s, the load balancer polling `/readyz`, `/api/v1/ws` routed with WebSocket upgrades, port 9090 kept internal | Zero-downtime deploys; 15s drain | before the January mock run |
 | database | Schema gaps in design doc §5: a team membership table, `sponsor_keys`, a table for photo face embeddings, and loan history in `hardware_loans` | Later backend PRs (auth, scanning) | 2026-11-24 |
-| auth | Replace `auth::AllowAll` with real rules. Browsers can't set headers on a WebSocket, so web uses the cookie and native needs a token another way (query param or first message). Cookie auth also needs an `Origin` check on the upgrade. | Live updates are open to anyone until then | with the auth PR |
+| auth | Replace `auth::AllowAll` with real rules. Covered by Tamely/gh-core#7 (`ws_caller`, `ws_first_message`, `may_subscribe`); I wire them in when rebasing. Remove this row once #7 merges. | Live updates are open to anyone until then | with the auth PR |
 | backend (REST) | REST snapshots for rooms, teams and tickets should return the topic's current `seq` (`GET gh:seq:{topic}`), so a client knows where its live stream starts after a reload | Gap detection right after a resync | with the first REST endpoints |
 
 ## Done for others
