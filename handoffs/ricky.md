@@ -5,24 +5,33 @@ _Last updated: 2026-11-20_
 ## Owns
 **Auth: authentication and authorization for gh-core.** Sign-in, sessions, judge room access, roles. Built in **Rust** as the `server/auth` crate, plugged into Kenny's Axum server in `server/` (see `handoffs/kenny.md`, PR #4).
 
-**Database hosting** (assigned 2026-11-20). **Dev: local Docker** via `server/docker-compose.yml` (`pgvector/pgvector:pg16` + Redis 7, both on `127.0.0.1`, dev-only password; placeholder until Kenny's compose file lands). **QA/prod: the DigitalOcean droplet** (1 vCPU / 1GB for now, resize to ≥ 2 vCPU / 4GB before the January mock run; keep CPU/RAM-only resize so it can shrink back). Droplet not started. Plan: lock down the droplet (SSH keys only, firewall allows only SSH and later 80/443), Docker Compose with `pgvector/pgvector:pg16` and Redis 7 (no persistence) both listening on `127.0.0.1` only, a non-admin `ghcore_app` role, teammates reach it through an SSH tunnel, nightly `pg_dump` to DigitalOcean Spaces (hourly during the event) with a tested restore, monitoring alerts.
+**Database hosting** (assigned 2026-11-20). **Dev: local Docker** via `server/docker-compose.yml` (`pgvector/pgvector:pg16` + Redis 7, both on `127.0.0.1`, dev-only password; Kenny merges his services in). **QA/prod: the DigitalOcean droplet** (1 vCPU / 1GB for now, resize to ≥ 2 vCPU / 4GB before the January mock run; keep CPU/RAM-only resize so it can shrink back). Droplet not started. Plan: lock down the droplet (SSH keys only, firewall allows only SSH and later 80/443), Docker Compose with `pgvector/pgvector:pg16` and Redis 7 (no persistence) both listening on `127.0.0.1` only, a non-admin `ghcore_app` role, teammates reach it through an SSH tunnel, nightly `pg_dump` to DigitalOcean Spaces (hourly during the event) with a tested restore, monitoring alerts.
 
 ## Status
-**PR 1a committed** (`1bb55aa` on `ricky/auth-tokens`, fork `liangricky7/gh-core`, not pushed). PR 1b in progress.
+**PR 1 done, all 9 steps** on `ricky/auth-tokens` (fork `liangricky7/gh-core`, not pushed): `1bb55aa` steps 1–3, `56b8003` step 4 and the migration move, then steps 5–9. Next: push and open the PR, then PR 2 (email/SMS codes).
 
 **Order (from Ricky's senior dev, 2026-11-20): all five auth PRs and the Postgres host are finished and pushed before Kenny pushes his server stack.** Local Docker counts as the host for now; it will most likely have to be the droplet. So auth lands on `main` first and Kenny builds on it:
 - `server/Cargo.toml` and `server/docker-compose.yml` are the **real** files. Kenny merges his members and services into them.
 - `server/migrations/0001_users_and_auth.sql` is the **first** migration and creates a minimal `users` table. Kenny's spec migration becomes 0002 and **adds** his columns to `users` instead of creating it.
-- Auth is a set of building blocks with no server around it, tested on a small stand-in router: `auth::layer` (who is calling), the policy map and default deny, revocation, and a topic check for WebSockets. Kenny's realtime PR calls the topic check in place of `auth::AllowAll`, and mounts `auth::routes` and `auth::layer` in his router.
+- Auth is a set of building blocks with no server around it, tested on a small stand-in router: `auth::layer` (who is calling, policy map with default deny, revocation, renewal), `auth::routes`, and `auth::ws_caller` / `ws_first_message` / `may_subscribe` for WebSockets. Kenny's server builds an `AuthState` (his `PgPool` and fred client go in `Sessions`), calls `sessions.reload(now)` at startup, merges `auth::routes`, adds a policy for each of his routes to `auth::policies()`, puts `auth::layer` on the whole router with `Router::layer`, and uses the WebSocket functions in place of `auth::AllowAll`.
 
 No Rust toolchain on Ricky's Mac yet: tests run in Docker (`rust:1-slim-bookworm`, Postgres from `pgvector/pgvector:pg16`):
 ```
 docker compose -f server/docker-compose.yml up -d --wait
 docker run --rm -v "$PWD/server:/work" -w /work -v gh-auth-cargo:/usr/local/cargo/registry -v gh-auth-target:/target -e CARGO_TARGET_DIR=/target -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/postgres rust:1-slim-bookworm cargo test -p auth
 ```
+Add `-e REDIS_URL=redis://host.docker.internal:6379` to that `docker run` (sessions, matrix and WebSocket tests use Redis).
+
+Try it by hand with the dev-only `auth-dev` tool (fixed dev key, never deployed). From the repo root, define a helper (works in zsh and bash), start the server, then mint a token and curl in a second terminal (define the helper there too):
+```
+gh_rust() { docker run --rm -v "$PWD/server:/work" -w /work -v gh-auth-cargo:/usr/local/cargo/registry -v gh-auth-target:/target -e CARGO_TARGET_DIR=/target -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/postgres -e REDIS_URL=redis://host.docker.internal:6379 "$@"; }
+gh_rust -e AUTH_DEV_ADDR=0.0.0.0:8080 -p 127.0.0.1:8080:8080 rust:1-slim-bookworm cargo run -q --bin auth-dev -- serve
+T=$(gh_rust rust:1-slim-bookworm cargo run -q --bin auth-dev -- mint ADMIN)
+curl -H "Authorization: Bearer $T" 127.0.0.1:8080/api/v1/me
+```
 
 ### PR 1 build order (agreed 2026-11-20)
-Proposed split into two stacked PRs: **1a = steps 1–3** (no request-path code), **1b = steps 4–9**. 1a is underway; one combined PR is still an option.
+All steps done (2026-11-20). Planned as two stacked PRs (1a = steps 1–3, 1b = 4–9); one combined PR is also fine since nothing is pushed.
 
 | # | Step | Proves | Test |
 |---|---|---|---|
@@ -30,11 +39,11 @@ Proposed split into two stacked PRs: **1a = steps 1–3** (no request-path code)
 | 2 | Ed25519 JWT issue/verify (`server/auth/src/token.rs`), `kid` = RFC 7638 thumbprint, old public keys accepted | Mint tokens, reject every bad one | Table test: tampered, wrong key, `alg: none`/`HS256`, unknown `kid`, expired (fake clock), old key OK |
 | 3 | `GET /.well-known/jwks.json` (`auth::routes`) | Others can verify with public info only | `jsonwebtoken` verifies our token using only the JWKS; no `d` in output |
 | 4 | **Done** (`auth::layer`, `auth::identify`). Caller extraction: `__Host-session` cookie or `Authorization: Bearer`; `Origin` = `https://app.geauxhack.com` on cookie requests that change data | Every request is a known caller or anonymous | Cookie, Bearer, none, garbage, cross-origin POST → 403 |
-| 5 | Sessions + revocation: logout, admin revoke, Redis `gh:revoked:{sid}` with TTL, Postgres fallback on Redis error (both down → 503), reload on startup, sliding renewal under 7 days | Revoke works on the next request, even across Redis restarts/outages | Revoke → 401; flush+restart → 401; Redis down → 401; day 6 / 8 / 15 with fake clock |
-| 6 | Policies + default deny: one global layer looks up the matched path in a policy map (`Public`, `RequireRole`, `RequireRoom`); no entry → 403. Kenny's `/healthz`, `/readyz` are `Public`. First route `GET /api/v1/me` | A forgotten route is locked | Per-policy unit tests; unlisted route → 403 |
-| 7 | WebSocket auth replacing Kenny's `auth::AllowAll`: web = cookie + `Origin` check; native = token as first message (never in the URL, which gets logged). `user:{id}` self only, `room:{id}` that room's judges + admins, `team:*` / `mentor-tag:*` admin only until their tables exist | Live updates no longer open to anyone | Topic × caller tests |
-| 8 | Route × role matrix test (anon, each role, judge room A/B, revoked, expired); fails if a policy-map route has no row | Whole authorization picture in one table | `cargo test` |
-| 9 | Dev-only `mint-token` binary (never part of the server) | Test signed-in requests before sign-in exists | `curl -H "Authorization: Bearer $(mint-token --role ADMIN)" …/api/v1/me` |
+| 5 | **Done** (`auth::Sessions`, tests/sessions.rs). Sessions + revocation: logout `POST /api/v1/auth/logout`, admin `POST /api/v1/admin/users/{id}/revoke-sessions`, Redis `gh:revoked:{sid}` with TTL plus a `gh:revoked:ready` marker (missing = Redis lost its data → ask Postgres and reload), Postgres fallback on Redis error (both down → 503), reload on startup, sliding renewal under 7 days (cookie re-set on web, `x-session-token` response header on native; judge sessions never renew) | Revoke works on the next request, even across Redis restarts/outages | Revoke → 401; flush+restart → 401; Redis down → 401; day 6 / 8 / 15 with fake clock |
+| 6 | **Done** (`auth::Policy`, `auth::policies()`). Policies + default deny: one global layer looks up `"METHOD /matched/path"` in a policy map (`Public`, `SignedIn`, `RequireRole`, `RequireRoom`); no entry → 403, signed out → 401, wrong role → 403. Kenny's `/healthz`, `/readyz`, `/api/v1/ws` are `Public`. First route `GET /api/v1/me` | A forgotten route is locked | Per-policy unit tests; unlisted route → 403 |
+| 7 | **Done** (`auth::ws_caller`, `ws_first_message`, `may_subscribe`, tests/ws.rs). WebSocket auth replacing Kenny's `auth::AllowAll`: web = cookie + `Origin` check; native = token as first message (never in the URL, which gets logged). `user:{id}` self only, `room:{id}` that room's judges + admins, `team:*` / `mentor-tag:*` admin only until their tables exist | Live updates no longer open to anyone | Topic × caller tests |
+| 8 | **Done** (tests/matrix.rs). Route × role matrix test (anon, each role, no roles, judge room A/B, revoked, expired, unlisted and unknown routes); fails if a policy-map route has no row | Whole authorization picture in one table | `cargo test` |
+| 9 | **Done** as `auth-dev mint ROLE [email]` plus `auth-dev serve` (auth's routes on :8080), since there's no server to curl yet. Dev-only binary, fixed dev key, never part of the server | Test signed-in requests before sign-in exists | `curl -H "Authorization: Bearer $(mint-token --role ADMIN)" …/api/v1/me` |
 
 ### Later PRs
 2. Email/SMS one-time codes. 3. OAuth: Google, GitHub, Apple. 4. Judge room tokens, exchange endpoint, QR script, audit log. 5. Native/offline client pieces (with Josh's storage interface).
@@ -58,24 +67,32 @@ Proposed split into two stacked PRs: **1a = steps 1–3** (no request-path code)
 - **JWKS is cached for 5 minutes.** After a key rotation, outside verifiers can miss the new key for up to 5 minutes. Only matters if something other than our server verifies tokens.
 - **Development uses local Docker Postgres/Redis; the droplet is QA/prod only** (2026-11-20). No heavy traffic in the dev phase, so the droplet stays small until the mock run.
 - **In QA/prod, the API server, Postgres and Redis all run on the same DigitalOcean droplet** (2026-11-20). Postgres and Redis are never reachable from the internet; the API connects over `127.0.0.1` (Kenny's note: not `localhost`). Avoids sending every query across the internet, which a separate host (e.g. AWS) would.
-- **Revocation when Redis is down:** fall back to Postgres; if both are down, 503, never allow.
+- **Revocation when Redis is down:** fall back to Postgres; if both are down, 503, never allow. Public routes (health checks, JWKS) skip the check, so they keep working.
+- **Redis losing its data is detected with a `gh:revoked:ready` marker** set after a reload. Redis runs without persistence, so a restart empties it; without the marker, revoked tokens would pass until our server restarted.
+- **Logout/revoke returns 503 if the Redis cache can't be updated or marked stale**, so a revoke never silently half-works. Retrying is safe.
+- **Public routes always see `Caller::Anonymous`**, so a public handler can't accidentally rely on who's calling.
+- **Added a `SignedIn` policy** (any role, or none) for `/me` and logout, so a brand-new account with no roles can still sign out.
+- **Judge sessions never renew**; they end with judging.
+- **Revocation doesn't close open WebSockets** (checked on connect only). Fine for now; re-check per event if it matters.
+- **`auth-dev` uses a fixed dev signing key**, so its tokens only work on `auth-dev serve`, never on a real server.
 - **Secure-storage plugin (proposed, not final):** `@aparajita/capacitor-secure-storage`, as named in the ticket. To be confirmed as maintained before PR 1.4 needs it.
 - **SMS codes:** Twilio Verify generates and checks SMS codes itself, so the hash / expiry / attempt rules are built by us for **email** codes only.
 
 ## Provides to others
-- `auth::Keys` (`load`, `issue`, `verify`), `auth::Claims`, `auth::Role`: **in progress (PR 1a)**, shape may still change.
-- `auth::routes(keys)` → `GET /.well-known/jwks.json`, policy Public: **in progress (PR 1a)**.
-- Planned, not built yet:
-  - `POST /api/v1/judge/exchange`: judge QR token → `JUDGE_ROOM` session.
-  - Session cookie `__Host-session` (web), `Authorization: Bearer <jwt>` (native).
-  - JWT claims: `sub`, `roles`, `sid`, `iat`, `exp`, `room_id` (judges).
-  - Policy map with `RequireRole(...)` / `RequireRoom` for every backend route. A route with no policy returns `403`. **Kenny:** new routes need an entry, or they 403.
-  - `GET /api/v1/me` for Josh's profile snapshot.
+Built in PR 1 (not pushed yet; shapes may still change before it merges):
+- `auth::Keys` (`load`, `issue`, `verify`), `auth::Claims`, `auth::Role`.
+- `auth::AuthState { keys, origin, now, sessions: Sessions { db, redis }, policies }`, `auth::layer` (put on the whole router with `Router::layer`), handlers read `Extension<auth::Caller>`.
+- `auth::routes(state)`: `GET /.well-known/jwks.json`, `GET /api/v1/me` (`{id, roles, exp, roomId?}`), `POST /api/v1/auth/logout` (204, clears the cookie), `POST /api/v1/admin/users/{id}/revoke-sessions` (admin).
+- Policy map `auth::policies()` keyed `"METHOD /path"` with `Public` / `SignedIn` / `RequireRole(...)` / `RequireRoom` (uses the `{room_id}` path parameter). A route with no policy returns `403`. **Kenny:** new routes need an entry, or they 403.
+- Session cookie `__Host-session` (web), `Authorization: Bearer <jwt>` (native). **Josh:** when a response has an `x-session-token` header, native stores that token in place of the old one (sliding renewal); web gets a new cookie automatically.
+- WebSockets: `auth::ws_caller(&state, &headers)` on upgrade, `auth::ws_first_message(&state, text)` for native's first message, `auth::may_subscribe(&caller, topic)` per subscribe. **Josh:** native sends the bare token as the first WebSocket message.
+- Revocation keys in Redis: `gh:revoked:{sid}` and `gh:revoked:ready`.
+- Planned: `POST /api/v1/judge/exchange` (PR 4): judge QR token → `JUDGE_ROOM` session.
 
 ## Needs from others
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
-| Kenny | **Rebase onto auth once it's on `main`** (per Ricky's senior dev, auth and Postgres land first). Your §5 migration becomes 0002: `users` already exists from `0001_users_and_auth.sql` (`id`, `email`, `phone_e164`, `created_at`), so ALTER it to add your columns. Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
+| Kenny | **Rebase onto auth once it's on `main`** (see Status for how to wire `AuthState`, `auth::layer`, `auth::routes` and the policy map; share your fred client) (per Ricky's senior dev, auth and Postgres land first). Your §5 migration becomes 0002: `users` already exists from `0001_users_and_auth.sql` (`id`, `email`, `phone_e164`, `created_at`), so ALTER it to add your columns. Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
 | Kenny | You take `POST /api/v1/notify` next; Ricky is on auth. | Answers "notify or auth next" in your handoff | — |
 | Kenny / database | Make `users.phone_e164`, `full_name`, `school`, `qr_hmac_sig` nullable (or filled later). A first Google/GitHub/Apple or email-code sign-in has none of them. | OAuth and codes PRs can't create users | before PR 2 |
 | Kenny / database | `presentation_rooms.panel_hmac_token` stores the judge token itself. The ticket says store only a token **version** and a token **hash**, plus a judging window (start/end). | Judge rooms PR | before PR 4 |
