@@ -6,7 +6,7 @@
 //!   judge-admin rotate ROOM_ID             new placard; the old one and every session it gave out stop working
 //!
 //! Needs DATABASE_URL and JUDGE_KEY (K_judge, from the secrets store), plus
-//! REDIS_URL for `rotate`. APP_URL defaults to https://app.geauxhack.com.
+//! REDIS_URL for `rotate`. APP_URL defaults to https://app.geauxhack.org.
 //! The server applies migrations; this tool doesn't.
 //! The printed URLs are credentials: anyone with one can judge that room.
 
@@ -30,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let env = |name: &str| std::env::var(name).map_err(|_| format!("set {name}"));
     let key = JudgeKey::load(&env("JUDGE_KEY")?)?;
-    let app = std::env::var("APP_URL").unwrap_or("https://app.geauxhack.com".into());
+    let app = std::env::var("APP_URL").unwrap_or("https://app.geauxhack.org".into());
     let url = |token: &str| format!("{}/judge/{token}", app.trim_end_matches('/'));
     let db = sqlx::PgPool::connect(&env("DATABASE_URL")?).await?;
 

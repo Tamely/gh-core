@@ -39,7 +39,7 @@ pub enum Via {
 
 pub struct AuthState {
     pub keys: Keys,
-    /// The web app's origin, e.g. `https://app.geauxhack.com`.
+    /// The web app's origin, e.g. `https://app.geauxhack.org`.
     pub origin: String,
     /// Unix seconds. Real servers pass the system clock; tests pass a fixed time.
     pub now: fn() -> i64,

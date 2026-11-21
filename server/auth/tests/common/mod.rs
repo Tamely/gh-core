@@ -18,7 +18,7 @@ use tower::ServiceExt;
 
 pub const NOW: i64 = 1_800_000_000;
 pub const DAY: i64 = 24 * 60 * 60;
-pub const ORIGIN: &str = "https://app.geauxhack.com";
+pub const ORIGIN: &str = "https://app.geauxhack.org";
 
 pub fn keys() -> Keys {
     Keys::new(SigningKey::from_bytes(&[1; 32]), vec![])
@@ -197,7 +197,7 @@ pub async fn fake_provider() -> Fake {
 /// Postmark for email and Twilio Verify for SMS, both pointed at `fake`.
 pub fn fake_codes(fake: &Fake) -> Codes {
     Codes::new(
-        Sender::Postmark { api: fake.url.clone(), token: "pm-token".into(), from: "codes@geauxhack.com".into() },
+        Sender::Postmark { api: fake.url.clone(), token: "pm-token".into(), from: "codes@geauxhack.org".into() },
         Sender::TwilioVerify {
             api: fake.url.clone(),
             account_sid: "AC123".into(),
