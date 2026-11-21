@@ -12,7 +12,8 @@ ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 fred = { version = "10", features = ["i-scripts"] }
 # OS randomness for sign-in codes (already in the tree through ed25519-dalek).
 getrandom = "0.2"
-# Postmark and Twilio calls. 0.12 with rustls + webpki roots: the CA list is built in,
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+# Postmark, Twilio and OAuth calls. 0.12 with rustls + webpki roots: the CA list is built in,
 # so it works in Kenny's FROM scratch image (0.13 reads the system's CAs, which that image lacks).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde = { version = "1", features = ["derive"] }
@@ -25,6 +26,4 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
 
 [dev-dependencies]
-# Independent JWT library, used only to prove other software can verify our tokens.
-jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 tower = { version = "0.5", features = ["util"] }

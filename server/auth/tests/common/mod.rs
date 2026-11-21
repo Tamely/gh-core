@@ -89,7 +89,7 @@ pub fn state(db: PgPool, redis: Client, now: fn() -> i64) -> Arc<AuthState> {
 }
 
 pub fn state_with(db: PgPool, redis: Client, now: fn() -> i64, codes: Codes) -> Arc<AuthState> {
-    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions::new(db, redis), policies: policies(), codes })
+    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions::new(db, redis), policies: policies(), codes, oauth: auth::OAuth::default() })
 }
 
 pub fn log_codes() -> Codes {

@@ -61,11 +61,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     redis.init().await?;
     let state = Arc::new(AuthState {
         keys: Keys::new(SigningKey::from_bytes(&[7; 32]), vec![]),
-        origin: "http://127.0.0.1:8080".into(),
+        origin: std::env::var("AUTH_DEV_ORIGIN").unwrap_or("http://127.0.0.1:8080".into()),
         now,
         sessions: Sessions::new(db, redis),
         policies: policies(),
         codes: Codes::from_env()?,
+        oauth: auth::OAuth::from_env()?,
     });
 
     match args[..] {

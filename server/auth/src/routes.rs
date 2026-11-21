@@ -36,6 +36,7 @@ pub fn jwks(keys: &Keys) -> Value {
 /// Merge into the app's router, under the `auth::layer`.
 pub fn routes(state: Arc<AuthState>) -> Router {
     Router::new()
+        .merge(crate::oauth::routes())
         .route("/.well-known/jwks.json", get(jwks_handler))
         .route("/api/v1/auth/code", post(send_code))
         .route("/api/v1/auth/code/verify", post(verify_code))
@@ -72,7 +73,7 @@ impl CodeRequest {
 /// our own proxy added; earlier ones are whatever the client sent), else the TCP peer.
 /// `None` means the server is wired wrong (no proxy header and no
 /// `into_make_service_with_connect_info`); guessing would put everyone in one bucket.
-fn client_ip(headers: &HeaderMap, peer: Option<Extension<ConnectInfo<SocketAddr>>>) -> Option<String> {
+pub(crate) fn client_ip(headers: &HeaderMap, peer: Option<Extension<ConnectInfo<SocketAddr>>>) -> Option<String> {
     let forwarded = headers
         .get_all("x-forwarded-for")
         .iter()
@@ -122,17 +123,23 @@ async fn verify_code(
         Err(e) => return e.status().into_response(),
     }
     // The code is used up by now; if the database fails, the user asks for a new one.
-    let Ok(id) = user_for(&state.sessions.db, &to).await else { return StatusCode::SERVICE_UNAVAILABLE.into_response() };
-    let Ok(claims) = state.sessions.start(&id, now).await else { return StatusCode::SERVICE_UNAVAILABLE.into_response() };
+    let web = headers.get(header::ORIGIN).is_some_and(|o| o == state.origin.as_str());
+    sign_in(&state, &to, now, web).await.unwrap_or_else(IntoResponse::into_response)
+}
+
+/// Code and OAuth sign-in share account linking, role loading and session delivery.
+pub(crate) async fn sign_in(state: &AuthState, to: &Dest, now: i64, web: bool) -> Result<Response, StatusCode> {
+    let id = user_for(&state.sessions.db, to).await.map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    let claims = state.sessions.start(&id, now).await.map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let token = state.keys.issue(&claims);
     let mut body = json!({ "id": claims.sub, "roles": claims.roles, "exp": claims.exp });
     let no_store = (header::CACHE_CONTROL, "no-store");
-    if headers.get(header::ORIGIN).is_some_and(|o| o == state.origin.as_str()) {
+    Ok(if web {
         ([no_store], [(header::SET_COOKIE, session_cookie(&token))], Json(body)).into_response()
     } else {
         body["token"] = token.into();
         ([no_store], Json(body)).into_response()
-    }
+    })
 }
 
 /// The signed-in user, for the client's profile snapshot. More fields come with sign-in.

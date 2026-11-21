@@ -16,7 +16,7 @@ use axum::{
     RequestExt,
 };
 
-use crate::{Claims, Codes, Keys, Policies, Policy, Sessions, SESSION_SECS};
+use crate::{Claims, Codes, Keys, OAuth, Policies, Policy, Sessions, SESSION_SECS};
 
 /// Web session cookie. `__Host-` makes browsers insist on Secure, Path=/ and no Domain.
 pub const COOKIE: &str = "__Host-session";
@@ -48,6 +48,7 @@ pub struct AuthState {
     pub policies: Policies,
     /// Email and SMS sign-in codes.
     pub codes: Codes,
+    pub oauth: OAuth,
 }
 
 /// `Set-Cookie` value for a session token. `Max-Age=0` with an empty token clears it.
@@ -101,7 +102,11 @@ pub async fn layer(State(state): State<Arc<AuthState>>, mut req: Request, next: 
 
     // SameSite=Lax already stops most cross-site requests; this is the second lock.
     let changes_data = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    if changes_data && cross_site(&state, &caller, req.headers()) {
+    // Apple's form_post callback only relays code/state to the client; it never
+    // changes a session. Completion still requires the client's retained verifier.
+    let apple_relay = *req.method() == Method::POST
+        && req.extensions().get::<MatchedPath>().is_some_and(|p| p.as_str() == "/auth/callback");
+    if changes_data && !apple_relay && cross_site(&state, &caller, req.headers()) {
         return StatusCode::FORBIDDEN.into_response();
     }
 

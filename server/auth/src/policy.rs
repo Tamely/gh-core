@@ -57,6 +57,9 @@ pub fn policies() -> Policies {
         ("POST /api/v1/auth/code", Policy::Public),
         ("POST /api/v1/auth/code/verify", Policy::Public),
         ("GET /api/v1/me", Policy::SignedIn),
+        ("POST /api/v1/auth/oauth/{provider}/start", Policy::Public),
+        ("POST /api/v1/auth/oauth/{provider}/complete", Policy::Public),
+        ("POST /auth/callback", Policy::Public),
         ("POST /api/v1/auth/logout", Policy::SignedIn),
         ("POST /api/v1/admin/users/{id}/revoke-sessions", Policy::RequireRole(vec![Role::Admin])),
     ]

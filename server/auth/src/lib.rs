@@ -3,6 +3,7 @@
 
 mod caller;
 mod codes;
+mod oauth;
 mod policy;
 mod routes;
 mod session;
@@ -11,6 +12,7 @@ mod ws;
 
 pub use caller::{identify, layer, session_cookie, AuthState, Caller, Via, COOKIE, RENEWED_TOKEN};
 pub use codes::{user_for, CodeError, Codes, Dest, Sender, CODE_SECS, MAX_TRIES};
+pub use oauth::OAuth;
 pub use policy::{policies, Policies, Policy};
 pub use routes::{jwks, routes};
 pub use session::{Sessions, Unavailable, RENEW_SECS};
