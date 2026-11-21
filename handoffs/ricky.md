@@ -16,7 +16,7 @@ _Last updated: 2026-11-21_
 
 **Final PR 2 code review (2026-11-21):** Reviewed the complete PR 2 diff plus the current audit fixes: generation/hash/expiry/attempt accounting, resend/consume races, provider error handling and redirects, session delivery, proxy-IP wiring and dev/release boundaries. No additional auth-code correctness defects found. **Credential blocker resolved (2026-11-21):** with Ricky's approval, all five Postmark/Twilio settings were preserved in ignored `server/.env` with permissions `0600`; `server/.env.example` now contains only blank values. Verified Git ignores the local file and no copied credential values remain in tracked working files. No implementation changes or live sends were made during this review; the latest 29-test/Clippy/release results and successful live email test remain applicable. SMS live validation is still pending. PR 2 is now published as [#8](https://github.com/Tamely/gh-core/pull/8); this handoff update is committed separately.
 
-**PR 4 (judge rooms) built and tested, not pushed or opened yet**, on `ricky/auth-judge-rooms` (worktree `.claude/worktrees/auth-judge-rooms` in the fork clone), branched from PR 2 (`ricky/auth-email-codes`) so it doesn't wait on PR 3. Ricky took PR 4 back from Kenny (2026-11-21). Built from the requirements doc https://claude.ai/artifact/NCxzNrcHu26EL2vE11kQpc:
+**PR 4 (judge rooms) built, tested and pushed; its PR isn't opened yet**, on `ricky/auth-judge-rooms` (worktree `.claude/worktrees/auth-judge-rooms` in the fork clone), branched from PR 2 (`ricky/auth-email-codes`) so it doesn't wait on PR 3. Ricky took PR 4 back from Kenny (2026-11-21). Built from the requirements doc https://claude.ai/artifact/NCxzNrcHu26EL2vE11kQpc:
 - Migration `server/migrations/0002_judge_rooms.sql`: minimal `presentation_rooms` (`room_id` letters/digits/`-`/`_`, `token_version`, `token_hash`, `judging_starts_at` / `judging_ends_at`), `sessions.user_id` nullable plus `sessions.room_id` (exactly one is set; a room with sessions can't be deleted, since a cascade would skip the Redis revocation cache: rotate first), and `judge_exchange_audit`.
 - `POST /api/v1/judge/exchange` `{"token"}` (`Public`) → 200 `{id: "judge:<sid>", roles: ["JUDGE_ROOM"], exp, roomId}` with the cookie for our web `Origin` (Max-Age = until judging ends) or `token` in the body otherwise. Every rejection (bad or missing body, won't decode, bad HMAC, unknown room, old version, outside the window) is the same bare 401. 503 if Postgres is down. `Cache-Control: no-store` and `Referrer-Policy: no-referrer` on every answer. Code in `server/auth/src/judge.rs`.
 - `judge-admin` (release-safe admin binary, runs against the real database): `room ROOM_ID STARTS ENDS` (create a room or move its window), `print [DIR]` (every room's URL, plus `DIR/ROOM_ID.svg` QR codes), `rotate ROOM_ID` (new placard; the old one and every session it gave out stop working). Needs `DATABASE_URL`, `JUDGE_KEY`, and `REDIS_URL` for rotate; `APP_URL` defaults to `https://app.geauxhack.org`.
@@ -119,7 +119,7 @@ All steps done (2026-11-20), shipped as **one PR**: [Tamely/gh-core#7](https://g
 - **Router wiring rules for Kenny:** call `.layer(auth::layer)` **last** (axum's `Router::layer` only wraps routes that already exist, so a route added after it skips auth), and use `nest(Router)`, not `nest_service` (nested services have no matched route, so they'd all be 403).
 - **Known small gaps, left on purpose:** unknown paths and wrong methods return 403 instead of 404/405 (safe, just less specific); CORS, if ever added, must sit outside the auth layer; the matrix test only checks `auth::policies()`, so Kenny's own routes need rows in a matrix of his; `gh:revoked:ready` is one shared Redis key, so two test runs at once on the same Redis can interfere.
 - **`auth-dev` uses a fixed dev signing key**, so its tokens only work on `auth-dev serve`, never on a real server.
-- **Secure-storage plugin (proposed, not final):** `@aparajita/capacitor-secure-storage`, as named in the ticket. To be confirmed as maintained before PR 1.4 needs it.
+- **Secure-storage plugin: `@aparajita/capacitor-secure-storage` 8.0.1** (decided 2026-11-21, PR 5). It supports Capacitor 8. On iOS it uses the Keychain with `afterFirstUnlockThisDeviceOnly`, so the token is readable while the phone is locked and never goes to iCloud or a backup. On Android it uses AES-GCM with a Keystore key. It runs on native only, because its web fallback is plain localStorage.
 - **SMS codes:** Twilio Verify generates and checks SMS codes itself, so the hash / expiry / attempt rules are built by us for **email** codes only (and for SMS in dev, where codes are printed).
 - **Email via Postmark** (Ricky, 2026-11-21). Real Postmark and Twilio Verify senders are in PR 2, tested against a fake local server; a live try needs the ops accounts.
 - **New accounts get no roles** (Ricky, 2026-11-21). An admin or the application flow grants them.
@@ -146,6 +146,13 @@ Built in PR 1 ([Tamely/gh-core#7](https://github.com/Tamely/gh-core/pull/7)) and
 - PR 2: `POST /api/v1/auth/code` and `POST /api/v1/auth/code/verify` (see Status). **Josh:** sign-in screen sends the email or E.164 phone, then the code; native keeps `token` from the verify response, web gets the cookie.
 - PR 4 (not opened yet): `POST /api/v1/judge/exchange` (see Status). `AuthState` gains `judge: JudgeKey::load(&JUDGE_KEY)?`. `auth::set_room` / `auth::rotate` back the `judge-admin` tool. **Kenny:** judging routes use a `{room_id}` path parameter with `Policy::RequireRoom`. **Josh:** the judge page posts the token from `/judge/<token>` to the exchange, then removes it with `history.replaceState`; native keeps `token` from the body.
 
+**PR 5 (client session) is a draft PR:** [Tamely/gh-core#11](https://github.com/Tamely/gh-core/pull/11) from `liangricky7:ricky/auth-client`, based on Josh's `pr-1.4-capacitor` (so the diff is only auth). `apps/client/src/auth/` gives one `auth` object:
+- `startup()`: offline, no network call; returns signed-in, expired or signed-out
+- `signIn(path, body)`: code, OAuth or judge exchange; a rejection leaves the current session alone
+- `api()`, `refresh()` (from `/me`) and `signOut()`
+
+Web relies on the HttpOnly cookie. Native keeps the token in the Keychain / Keystore and sends a Bearer header. `pnpm check` passes with 10 new tests. Not done: wiring into Josh's UI, and a run on a real device.
+
 ## Needs from others
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
@@ -165,11 +172,19 @@ Built in PR 1 ([Tamely/gh-core#7](https://github.com/Tamely/gh-core/pull/7)) and
 | infra | `JUDGE_KEY` (K_judge, 32 random bytes) in the secrets store, next to the Ed25519 key. The proxy / static host must **redact `/judge/*` paths from access logs** and serve `/judge/*` pages with `Referrer-Policy: no-referrer` | Judge placards; the token is in the placard URL's path | before printing placards |
 | infra | A secrets store for the Ed25519 private key and `K_judge` (Postgres and Redis are now Ricky's, on the droplet) | Sessions, judge tokens | before the January mock run |
 | infra / Josh | **Who deploys the API and web app on the droplet?** HTTPS for `app.geauxhack.org`, the PWA files, `/api/*` and `/api/v1/ws` proxied to the API on the same origin, the `.well-known` files (Josh's needs), and Kenny's deploy needs (20s stop grace, `/readyz` checks, port 9090 kept internal) | Production hosting | before the January mock run |
+| Josh | **Wire PR 5 (#11) into the UI:**
+- call `auth.startup()` at launch
+- sign-in screens and the judge page go through `auth.signIn`
+- show an expired banner
+- call `auth.refresh()` on resume or when back online | Sign-in works in the app | after #11 |
+| Josh | `android:allowBackup="true"` restores the encrypted token without its Keystore key. The app treats that as signed out (the user signs in again). It would be cleaner to exclude the secure-storage prefs from backup. Your call. | Clean restore on a new phone | before store release |
+| Josh | **Domain:** auth uses `geauxhack.org` (Ricky's decision). `pr-1.4-capacitor` and `landing-page` still say `geauxhack.com`. Please switch them, or tell Ricky if the landing page should stay on .com. | One domain everywhere | before deploy |
 | Josh | Storage interface (PR 1.2), deep links for `/auth/callback` and `/judge/:token` (PR 1.7), `history.replaceState` after exchange, `judge:room-rendered` performance mark | Native sign-in, judge flow, 200ms measurement | not blocking PR 1 |
 
 ## Done for others
 | For | What was done | Link |
 |---|---|---|
+| Josh | Picked the native secure-storage plugin (your "Which secure-storage plugin" need): `@aparajita/capacitor-secure-storage` 8.0.1, wired in PR 5 | [#11](https://github.com/Tamely/gh-core/pull/11) |
 
 ## Notes for the next session
 - Ricky is new to auth and asked for plain-language explanations; explain concepts before using them.
