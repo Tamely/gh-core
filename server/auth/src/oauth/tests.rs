@@ -6,7 +6,7 @@ use sqlx::{postgres::PgConnectOptions, PgPool};
 use tower::ServiceExt;
 
 const NOW: i64 = 1_800_000_000;
-const ORIGIN: &str = "https://app.geauxhack.com";
+const ORIGIN: &str = "https://app.geauxhack.org";
 const VERIFIER: &str = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
 
 async fn setup(schema: &str) -> Arc<AuthState> {

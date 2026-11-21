@@ -219,7 +219,7 @@ async fn postmark_request() {
     let body: Value = serde_json::from_str(&seen.body).unwrap();
     let Dest::Email(addr) = to else { unreachable!() };
     assert_eq!(body["To"], addr.as_str());
-    assert_eq!(body["From"], "codes@geauxhack.com");
+    assert_eq!(body["From"], "codes@geauxhack.org");
     assert_eq!(body["MessageStream"], "outbound");
 }
 

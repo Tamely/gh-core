@@ -33,7 +33,7 @@ until that cache expires. Requests time out after ten seconds and never follow
 redirects carrying credentials. TLS roots are bundled for Kenny's scratch image.
 
 The production domain is `.com` (confirmed by Ricky on 2026-11-21).
-Register exactly `https://app.geauxhack.com/auth/callback` with each provider
+Register exactly `https://app.geauxhack.org/auth/callback` with each provider
 (or the deployed `AuthState.origin` plus `/auth/callback`). Use the Google web
 OAuth client for this server-mediated flow on both web and native. Native launches
 the returned URL in the system browser, with the same HTTPS Universal/App Link.
@@ -120,7 +120,7 @@ The backend is implemented; that complete end-to-end criterion remains open.
 | Google and GitHub web sign-in | Live local exchanges and authenticated profile requests returned 200 for both providers; verified email linked both to one account. | Local check complete. Recheck on deployed HTTPS, including Safari. Auth/infra. |
 | Apple sign-in | Backend exchange, signed identity validation, client-secret signing and POST relay are tested with fixtures. | **Deferred by Ricky on 2026-11-21.** Obtain active Apple Developer Program membership (normally USD 99/year, or an approved fee waiver); team must decide the legal owner and Account Holder. Then configure App ID, Services ID, key and HTTPS return URL and test live. Team/ops/auth. |
 | Native OAuth on iOS and Android | Backend native token responses are tested. | Implement system-browser launch and callback handling in the Capacitor client, then test each provider on physical iPhone and Android devices. Josh/auth. |
-| Universal/App Link callback | Contract specifies `https://app.geauxhack.com/auth/callback` and documents verifier/state handling. | `app.geauxhack.com` did not resolve during the 2026-11-21 setup check. Configure DNS/HTTPS, host AASA/assetlinks, configure native associations, serve the GET callback UI and route Apple POST callbacks to the API. Josh/infra. |
+| Universal/App Link callback | Contract specifies `https://app.geauxhack.org/auth/callback` and documents verifier/state handling. | `app.geauxhack.org` has no DNS record yet (checked 2026-11-21; `geauxhack.org` itself resolves). Configure DNS/HTTPS, host AASA/assetlinks, configure native associations, serve the GET callback UI and route Apple POST callbacks to the API. Josh/infra. |
 | Verified-email account linking and session delivery | Live Google/GitHub account reuse passed. Tests also cover code-to-GitHub role reuse, Google/Apple account reuse, web cookie flags and native tokens. Provider tokens are not persisted. | Backend check complete. Wire the production client to the documented contract; native secure storage and offline startup are tracked in PR 5. |
 | Logout and immediate revocation | Live logout 204 → profile 401, Postgres revocation and Redis cache confirmed. Automated OAuth flows check original cookie/bearer rejection after logout and cross-site logout 403. | Local/backend check complete. |
 | OAuth security and authorization | Automated tests cover verifier/state/provider/Origin binding, single use/concurrent completion, signed identity claims, failure handling, abuse limits and route × role policies. | No additional backend implementation gap identified by this acceptance audit. Apple uses nonce plus verifier-bound completion rather than provider-side PKCE, as documented above. |
