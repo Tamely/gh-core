@@ -1,6 +1,6 @@
 # Ricky: handoff
 
-_Last updated: 2026-11-20_
+_Last updated: 2026-11-21_
 
 ## Owns
 **Auth: authentication and authorization for gh-core.** Sign-in, sessions, judge room access, roles. Built in **Rust** as the `server/auth` crate, plugged into Kenny's Axum server in `server/` (see `handoffs/kenny.md`, PR #4).
@@ -8,7 +8,9 @@ _Last updated: 2026-11-20_
 **Database hosting** (assigned 2026-11-20). **Dev: local Docker** via `server/docker-compose.yml` (`pgvector/pgvector:pg16` + Redis 7, both on `127.0.0.1`, dev-only password; Kenny merges his services in). **QA/prod: the DigitalOcean droplet** (1 vCPU / 1GB for now, resize to ≥ 2 vCPU / 4GB before the January mock run; keep CPU/RAM-only resize so it can shrink back). Droplet not started. Plan: lock down the droplet (SSH keys only, firewall allows only SSH and later 80/443), Docker Compose with `pgvector/pgvector:pg16` and Redis 7 (no persistence) both listening on `127.0.0.1` only, a non-admin `ghcore_app` role, teammates reach it through an SSH tunnel, nightly `pg_dump` to DigitalOcean Spaces (hourly during the event) with a tested restore, monitoring alerts.
 
 ## Status
-**PR 1 done, all 9 steps** on `ricky/auth-tokens` (fork `liangricky7/gh-core`, not pushed): `1bb55aa` steps 1–3, `56b8003` step 4 and the migration move, then steps 5–9. Next: push and open the PR, then PR 2 (email/SMS codes).
+**PR 1 done and in review** as [Tamely/gh-core#7](https://github.com/Tamely/gh-core/pull/7) from `liangricky7:ricky/auth-tokens` (the fork PR liangricky7/gh-core#1 is closed).
+
+**PR 2 (email/SMS sign-in codes) built and tested, stacked on PR 1**, not pushed or opened yet (opens on Tamely/gh-core after PR 1 merges, or as a stacked PR when Ricky says). 26 tests pass in Docker; every rule was sabotaged once and a test went red (including the fixes from a code review: per-IP limits sized for a shared venue IP, a daily guess cap per address, plain-ASCII emails only, codes stored only after sending, provider errors mapped to 400/429/503). **PR 2 adds no migration** (it uses `users.email` / `phone_e164` from 0001).
 
 **Order (from Ricky's senior dev, 2026-11-20): all five auth PRs and the Postgres host are finished and pushed before Kenny pushes his server stack.** Local Docker counts as the host for now; it will most likely have to be the droplet. So auth lands on `main` first and Kenny builds on it:
 - `server/Cargo.toml` and `server/docker-compose.yml` are the **real** files. Kenny merges his members and services into them.
@@ -23,14 +25,14 @@ docker run --rm -v "$PWD/server:/work" -w /work -v gh-auth-cargo:/usr/local/carg
 
 Try it by hand with the dev-only `auth-dev` tool (fixed dev key, never deployed). From the repo root, define a helper (works in zsh and bash), start the server, then mint a token and curl in a second terminal (define the helper there too):
 ```
-gh_rust() { docker run --rm -v "$PWD/server:/work" -w /work -v gh-auth-cargo:/usr/local/cargo/registry -v gh-auth-target:/target -e CARGO_TARGET_DIR=/target -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/postgres -e REDIS_URL=redis://host.docker.internal:6379 "$@"; }
+gh_rust() { docker run --rm -v "$PWD/server:/work" -w /work -v gh-auth-cargo:/usr/local/cargo/registry -v gh-auth-target:/target -e CARGO_TARGET_DIR=/target -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/postgres -e REDIS_URL=redis://host.docker.internal:6379 --env-file server/.env "$@"; }
 gh_rust -e AUTH_DEV_ADDR=0.0.0.0:8080 -p 127.0.0.1:8080:8080 rust:1-slim-bookworm cargo run -q --bin auth-dev -- serve
 T=$(gh_rust rust:1-slim-bookworm cargo run -q --bin auth-dev -- mint ADMIN)
 curl -H "Authorization: Bearer $T" 127.0.0.1:8080/api/v1/me
 ```
 
 ### PR 1 build order (agreed 2026-11-20)
-All steps done (2026-11-20), shipped as **one PR** (liangricky7/gh-core#1 on the fork; to be opened on Tamely/gh-core). Auth PRs 2–5 are separate PRs, each merged before the next opens; Kenny's merges only after all five.
+All steps done (2026-11-20), shipped as **one PR**: [Tamely/gh-core#7](https://github.com/Tamely/gh-core/pull/7) (the fork PR liangricky7/gh-core#1 is closed). Auth PRs 2–5 are separate PRs, each merged before the next opens; Kenny's merges only after all five.
 
 | # | Step | Proves | Test |
 |---|---|---|---|
@@ -44,8 +46,16 @@ All steps done (2026-11-20), shipped as **one PR** (liangricky7/gh-core#1 on the
 | 8 | **Done** (tests/matrix.rs). Route × role matrix test (anon, each role, no roles, judge room A/B, revoked, expired, unlisted and unknown routes); fails if a policy-map route has no row | Whole authorization picture in one table | `cargo test` |
 | 9 | **Done** as `auth-dev mint ROLE [email]` plus `auth-dev serve` (auth's routes on :8080), since there's no server to curl yet. Dev-only binary, fixed dev key, never part of the server | Test signed-in requests before sign-in exists | `curl -H "Authorization: Bearer $(auth-dev mint ADMIN)" 127.0.0.1:8080/api/v1/me` (full Docker commands under Status) |
 
+### PR 2: sign-in codes (built 2026-11-21)
+- `POST /api/v1/auth/code` `{"email"}` or `{"phone"}` (E.164) → 202 (always, so it can't tell who has an account), 400 bad address (ours or the provider's: invalid or landline number, bounced email), 429 rate limit (ours or the provider's), 503 Redis/provider down, 500 if the server can't see the client's IP (wiring bug).
+- `POST /api/v1/auth/code/verify` `{"email" or "phone", "code"}` → 200 `{id, roles, exp}` plus the `__Host-session` cookie when `Origin` is our web app, or plus `token` in the body otherwise (native). 401 wrong/expired/used code, 400 bad address or no `code`, 429 rate limit (per IP, per address per day, or Twilio's), 503 Redis/Twilio/Postgres down, 500 if the server can't see the client's IP. `Cache-Control: no-store`.
+- Both are `Public` in `auth::policies()` with rows in `tests/matrix.rs`. Code in `server/auth/src/codes.rs`, tests in `server/auth/tests/codes.rs`.
+- `auth-dev serve` sends real codes through Postmark / Twilio when `server/.env` has their keys (copy `server/.env.example`; `.env` is git-ignored; `POSTMARK_SERVER_TOKEN=POSTMARK_API_TEST` checks requests without sending), and otherwise prints that channel's codes to its terminal: `curl -H 'content-type: application/json' -d '{"email":"me@example.com"}' 127.0.0.1:8080/api/v1/auth/code`, then the same to `/api/v1/auth/code/verify` with `"code"`.
+
 ### Later PRs
-2. Email/SMS one-time codes. 3. OAuth: Google, GitHub, Apple. 4. Judge room tokens, exchange endpoint, QR script, audit log. 5. Native/offline client pieces (with Josh's storage interface).
+3. OAuth: Google, GitHub, Apple. 4. **Judge rooms: assigned to Kenny (2026-11-21)**: judge room tokens, exchange endpoint, QR script, audit log. Requirements doc: https://claude.ai/artifact/NCxzNrcHu26EL2vE11kQpc (Ricky shares it with Kenny). 5. Native/offline client pieces (with Josh's storage interface).
+
+**Open question for Ricky's senior dev:** can PR 4 merge before PR 3 if OAuth is still waiting on credentials?
 
 ### Scope (summary of the ticket)
 - **Sign-in:** Google, GitHub, Apple (OAuth authorization code + PKCE; system browser on native; callback via Universal/App Link `https://app.geauxhack.com/auth/callback`; accounts linked by *verified* email). Plus 6-digit email/SMS codes (OS secure random, only a hash stored, 10 min expiry, 5 attempts, constant-time compare, rate limits per email/phone and per IP → `429`, phones in E.164). SMS via Twilio Verify; email via Postmark or SES.
@@ -81,32 +91,49 @@ All steps done (2026-11-20), shipped as **one PR** (liangricky7/gh-core#1 on the
 - **Known small gaps, left on purpose:** unknown paths and wrong methods return 403 instead of 404/405 (safe, just less specific); CORS, if ever added, must sit outside the auth layer; the matrix test only checks `auth::policies()`, so Kenny's own routes need rows in a matrix of his; `gh:revoked:ready` is one shared Redis key, so two test runs at once on the same Redis can interfere.
 - **`auth-dev` uses a fixed dev signing key**, so its tokens only work on `auth-dev serve`, never on a real server.
 - **Secure-storage plugin (proposed, not final):** `@aparajita/capacitor-secure-storage`, as named in the ticket. To be confirmed as maintained before PR 1.4 needs it.
-- **SMS codes:** Twilio Verify generates and checks SMS codes itself, so the hash / expiry / attempt rules are built by us for **email** codes only.
+- **SMS codes:** Twilio Verify generates and checks SMS codes itself, so the hash / expiry / attempt rules are built by us for **email** codes only (and for SMS in dev, where codes are printed).
+- **Email via Postmark** (Ricky, 2026-11-21). Real Postmark and Twilio Verify senders are in PR 2, tested against a fake local server; a live try needs the ops accounts.
+- **New accounts get no roles** (Ricky, 2026-11-21). An admin or the application flow grants them.
+- **Codes live in Redis** (`gh:code:{email|phone}:{addr}`, a hash with the SHA-256, expiry and try count), 10 minutes, 5 tries, single use. Lost on a Redis restart: users just ask for a new code. The try is counted before comparing, so parallel guesses get no extra tries, and only the request whose `DEL` removes the code signs in. Out of tries, the code is left to expire rather than deleted (deleting made a correct parallel guess lose).
+- **Rate limits** (fixed windows on Redis `gh:rl:*`): per address 1 code a minute, 5 an hour and 20 guesses a day; per IP 300 sends and 600 checks an hour. The per-IP limits are high because everyone at the venue shares one Wi-Fi IP; the per-address limits are the real guard (without the daily cap, 5 codes an hour × 5 tries let one account be guessed at 600 times a day). An attacker can lock a victim's address out of codes for up to an hour, and out of guesses for the rest of the day; accepted. If check-in outgrows the per-IP limits, allow-list the venue IP.
+- **Client IP = the last `X-Forwarded-For` entry** (the one our proxy adds), else the TCP peer. The proxy must **append** to `X-Forwarded-For` (Caddy does by default; nginx needs `$proxy_add_x_forwarded_for`). With neither, the code routes return 500 instead of putting every caller in one shared limit (see Needs from others for Kenny).
+- **Emails must be plain ASCII `local@domain`**: no display names, lists, quotes or comments, since Postmark's `To` would read `x<attacker@evil.com>` as a different recipient than the address we store as verified. International (non-ASCII) addresses are refused for now.
+- **A code is stored only after the provider accepts the email**, so a failed resend leaves the earlier code working. If the provider times out but still delivers, that code won't work and the user asks again.
+- **Provider answers:** a permanent refusal (Twilio 400/403, Postmark 422 with ErrorCode 300/406) is 400 so the user fixes the address; Postmark's or Twilio's 429 is 429; anything else, including other Postmark 422s (our own setup), is 503. A Twilio 200 we can't read is 503, not "wrong code", because Twilio may already have used the code up.
+- **Cookie vs token by `Origin`:** our web origin gets only the cookie (the token never reaches page scripts); anything else gets the token in the body. A page on another site gets nothing usable, which also blocks "log the victim into the attacker's account".
+- **The log sender exists only in debug builds** (`#[cfg(debug_assertions)]`), so production can't be set up to log codes; a release `auth-dev` refuses to run.
+- **reqwest 0.12 with rustls + webpki roots**, not 0.13: 0.13 reads the system's CA list, which Kenny's `FROM scratch` image doesn't have.
+- **Code hash is unsalted SHA-256** of address and code. Reading Redis already means owning the server; switch to HMAC with a secret if that changes.
 
 ## Provides to others
-Built in PR 1 (not pushed yet; shapes may still change before it merges):
+Built in PR 1 (Tamely/gh-core#7, in review) and PR 2 (not pushed); shapes may still change before they merge:
 - `auth::Keys` (`load`, `issue`, `verify`), `auth::Claims`, `auth::Role`.
-- `auth::AuthState { keys, origin, now, sessions: Sessions::new(db, redis), policies }`, `auth::layer` (put on the whole router with `Router::layer`, as the last call), handlers read `Extension<auth::Caller>`.
+- `auth::AuthState { keys, origin, now, sessions: Sessions::new(db, redis), policies, codes: Codes::from_env()? }` (PR 2 added `codes`; reads POSTMARK_SERVER_TOKEN, POSTMARK_FROM, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_VERIFY_SERVICE_SID, and a release build errors if any is missing), `auth::layer` (put on the whole router with `Router::layer`, as the last call), handlers read `Extension<auth::Caller>`.
 - `auth::routes(state)`: `GET /.well-known/jwks.json`, `GET /api/v1/me` (`{id, roles, exp, roomId?}`), `POST /api/v1/auth/logout` (204, clears the cookie), `POST /api/v1/admin/users/{id}/revoke-sessions` (admin).
 - Policy map `auth::policies()` keyed `"METHOD /path"` with `Public` / `SignedIn` / `RequireRole(...)` / `RequireRoom` (uses the `{room_id}` path parameter). A route with no policy returns `403`. **Kenny:** new routes need an entry, or they 403.
 - Session cookie `__Host-session` (web), `Authorization: Bearer <jwt>` (native). **Josh:** when a response has an `x-session-token` header, native stores that token in place of the old one (sliding renewal); web gets a new cookie automatically.
 - WebSockets: `auth::ws_caller(&state, &headers)` on upgrade, `auth::ws_first_message(&state, text)` for native's first message, `auth::may_subscribe(&caller, topic)` per subscribe. **Josh:** native sends the bare token as the first WebSocket message.
 - Revocation keys in Redis: `gh:revoked:{sid}` and `gh:revoked:ready`.
-- Planned: `POST /api/v1/judge/exchange` (PR 4): judge QR token → `JUDGE_ROOM` session.
+- PR 2: `POST /api/v1/auth/code` and `POST /api/v1/auth/code/verify` (see Status). **Josh:** sign-in screen sends the email or E.164 phone, then the code; native keeps `token` from the verify response, web gets the cookie.
+- Planned: `POST /api/v1/judge/exchange` (PR 4, now Kenny's): judge QR token → `JUDGE_ROOM` session.
 
 ## Needs from others
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
 | Kenny | **Rebase onto auth once it's on `main`** (see Status for how to wire `AuthState`, `auth::layer`, `auth::routes` and the policy map; share your fred client, built with a 1s `default_command_timeout` (without one a Redis outage hangs requests instead of falling back to Postgres); `.layer(auth::layer)` goes last; use your migration runner on `server/migrations`, which already has sqlx bookkeeping from `auth-dev`) (per Ricky's senior dev, auth and Postgres land first). Your §5 migration becomes 0002: `users` already exists from `0001_users_and_auth.sql` (`id`, `email`, `phone_e164`, `created_at`), so ALTER it to add your columns. Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
 | Kenny | You take `POST /api/v1/notify` next; Ricky is on auth. | Answers "notify or auth next" in your handoff | — |
-| Kenny / database | Make `users.phone_e164`, `full_name`, `school`, `qr_hmac_sig` nullable (or filled later). A first Google/GitHub/Apple or email-code sign-in has none of them. | OAuth and codes PRs can't create users | before PR 2 |
-| Kenny / database | `presentation_rooms.panel_hmac_token` stores the judge token itself. The ticket says store only a token **version** and a token **hash**, plus a judging window (start/end). | Judge rooms PR | before PR 4 |
-| Josh | Confirm the production domain is `app.geauxhack.com`: `handoffs/josh.md` on `main` still says `app.geauxhack.org` (deep links, privacy URL, hosting). Auth's `Origin` check uses `.com`. | A `.org` site would get 403 on every cookie request that changes data | before PR 2 |
+| Kenny / database | When your §5 migration adds `full_name`, `school`, `qr_hmac_sig` to `users`, make them nullable (or filled later); `phone_e164` already is (0001). A first Google/GitHub/Apple or code sign-in has none of them. | Code sign-in (PR 2) and OAuth would fail to create users | with your §5 migration |
+| Kenny | Serve with `into_make_service_with_connect_info::<SocketAddr>()` (as `auth-dev serve` does), so the sign-in code routes can see the caller's IP when no proxy header is there; without it they return 500 | Per-IP rate limits on sign-in codes (PR 2) | when you rebase onto auth |
+| Kenny | **Build auth PR 4 (judge rooms)** from https://claude.ai/artifact/NCxzNrcHu26EL2vE11kQpc. Branch from `ricky/auth-tokens`, or `main` once PR 1 merges. Its migration (a) creates a minimal `presentation_rooms` (`room_id VARCHAR(32)` PK, `token_version`, `token_hash`, `judging_starts_at` / `judging_ends_at`), (b) makes `sessions.user_id` nullable and adds `sessions.room_id` with a CHECK that exactly one is set (judge sessions have no user, and `is_revoked` treats a `sid` with no row as revoked), (c) adds `judge_exchange_audit`. | Judge rooms | — |
+| Kenny / database | Your §5 migration later ALTERs `presentation_rooms` (adds `track`, `floor_number`, `svg_x`, `svg_y`) and drops `panel_hmac_token`, instead of creating the table. | One migration history | with your §5 migration |
+| Kenny | **Agree migration numbers before either PR adds one:** PR 3 (OAuth) and PR 4 may both want `0002`. PR 2 adds none. | Migration conflicts | before PR 3 or PR 4 adds a migration |
+| Josh | Confirm the production domain is `app.geauxhack.com`: `handoffs/josh.md` on `main` still says `app.geauxhack.org` (deep links, privacy URL, hosting). Auth's `Origin` check uses `.com`. | A `.org` site would get 403 on every cookie request that changes data, and code sign-in would hand it a token instead of a cookie | before deployment |
 | Josh | `handoffs/josh.md` says `/api/*` goes to "the Rust server": correct, the backend is Rust (Kenny's Axum server). No change needed. | — | — |
 | ops | Google OAuth client IDs (web, iOS, Android) | OAuth PR | before OAuth PR |
 | ops | GitHub OAuth app | OAuth PR | before OAuth PR |
 | ops | Sign in with Apple: Services ID and private key (needs the Apple Developer enrollment Josh already asked for) | OAuth PR; App Store guideline 4.8 | before OAuth PR |
-| ops | Twilio account with a Verify service; Postmark or SES account with a verified sending domain | One-time codes PR | before codes PR |
+| ops | Accounts are set up (2026-11-21). Left: confirm Postmark's sender/domain is verified, Twilio Verify's code length is 6 and US geo permissions are on, then a live send to Ricky's own email and phone via `auth-dev serve` | Live sign-in codes (PR 2 is built and tested against a fake) | before the January mock run |
+| infra | The HTTPS proxy in front of the API must **append** the client IP to `X-Forwarded-For` | Per-IP rate limits on sign-in codes | when hosting exists |
 | infra | A secrets store for the Ed25519 private key and `K_judge` (Postgres and Redis are now Ricky's, on the droplet) | Sessions, judge tokens | before the January mock run |
 | infra / Josh | **Who deploys the API and web app on the droplet?** HTTPS for `app.geauxhack.com`, the PWA files, `/api/*` and `/api/v1/ws` proxied to the API on the same origin, the `.well-known` files (Josh's needs), and Kenny's deploy needs (20s stop grace, `/readyz` checks, port 9090 kept internal) | Production hosting | before the January mock run |
 | Josh | Storage interface (PR 1.2), deep links for `/auth/callback` and `/judge/:token` (PR 1.7), `history.replaceState` after exchange, `judge:room-rendered` performance mark | Native sign-in, judge flow, 200ms measurement | not blocking PR 1 |
