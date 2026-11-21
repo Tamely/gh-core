@@ -32,7 +32,8 @@ _Last updated: 2026-11-21_
   - p99 under 20ms: yes, see Latency.
   - Admin script prints URL + QR for every room, rotate kills the old placard: yes, smoke-tested again after the review fixes on a throwaway database (SVGs are 0600); rotate also tested in `tests/judge.rs`.
   - Sabotage (skip version / window / HMAC check → test goes red): yes, rerun on the final exchange code.
-  - **Not done, needs Josh's judge page and a phone (out of PR 4's scope per the doc):** scan → `judge:room-rendered` within 200ms, and the token gone from the address bar and history after the exchange. Check these together when Josh's `/judge/:token` page exists.
+  - **Scan → render and address bar, checked with a stand-in page** (2026-11-21): a throwaway `/judge/:token` page (not Josh's, not in the repo) running against `auth-dev` in a desktop browser. It calls `history.replaceState` first, exchanges, gets the HttpOnly cookie, calls `/me`, then marks `judge:room-rendered`. Results: the address bar shows `/judge`, Back skips straight past the token page, and the cookie isn't readable by page JavaScript. Navigation start → mark over 10 loads: **median ≈50ms, max 111ms** (first load in a fresh browser 225ms). So the server side fits the 200ms budget with room to spare. **Still to do with Josh:** the official run on his real page, on a physical phone over venue Wi-Fi (median of 10, cold cache, p95 + device in the PR).
+  - **For Josh's page:** call `history.replaceState` before the exchange, not after; and on a reload of `/judge` (no token left) check `/me` first, because there's nothing to exchange and the cookie is already set.
 
 **Order (from Ricky's senior dev, 2026-11-20): all five auth PRs and the Postgres host are finished and pushed before Kenny pushes his server stack.** Local Docker counts as the host for now; it will most likely have to be the droplet. So auth lands on `main` first and Kenny builds on it:
 - `server/Cargo.toml` and `server/docker-compose.yml` are the **real** files. Kenny merges his members and services into them.
@@ -165,6 +166,7 @@ Built in PR 1 ([Tamely/gh-core#7](https://github.com/Tamely/gh-core/pull/7)) and
 | infra | `JUDGE_KEY` (K_judge, 32 random bytes) in the secrets store, next to the Ed25519 key. The proxy / static host must **redact `/judge/*` paths from access logs** and serve `/judge/*` pages with `Referrer-Policy: no-referrer` | Judge placards; the token is in the placard URL's path | before printing placards |
 | infra | A secrets store for the Ed25519 private key and `K_judge` (Postgres and Redis are now Ricky's, on the droplet) | Sessions, judge tokens | before the January mock run |
 | infra / Josh | **Who deploys the API and web app on the droplet?** HTTPS for `app.geauxhack.com`, the PWA files, `/api/*` and `/api/v1/ws` proxied to the API on the same origin, the `.well-known` files (Josh's needs), and Kenny's deploy needs (20s stop grace, `/readyz` checks, port 9090 kept internal) | Production hosting | before the January mock run |
+| Josh | Domain: your handoff says `app.geauxhack.org`, the PR 4 doc and `judge-admin`/`AuthState.origin` use `app.geauxhack.com`. Which one? The placard QR codes and the cookie Origin depend on it | Placards scan to the wrong site | before printing placards |
 | Josh | Storage interface (PR 1.2), deep links for `/auth/callback` and `/judge/:token` (PR 1.7), `history.replaceState` after exchange, `judge:room-rendered` performance mark | Native sign-in, judge flow, 200ms measurement | not blocking PR 1 |
 
 ## Done for others
