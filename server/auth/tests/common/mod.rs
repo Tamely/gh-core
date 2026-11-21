@@ -48,8 +48,9 @@ pub fn dead_db() -> PgPool {
 
 pub async fn redis() -> Client {
     let url = std::env::var("REDIS_URL").unwrap_or("redis://127.0.0.1:6379".into());
+    // Generous: Docker Desktop on a Mac can stall a command past 1s under load.
     let client = Builder::from_config(Config::from_url(&url).unwrap())
-        .with_performance_config(|c| c.default_command_timeout = Duration::from_secs(1))
+        .with_performance_config(|c| c.default_command_timeout = Duration::from_secs(5))
         .build()
         .unwrap();
     client.init().await.unwrap();
