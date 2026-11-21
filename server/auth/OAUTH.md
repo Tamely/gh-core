@@ -11,7 +11,7 @@ no roles. A missing/unverified email is rejected; users can sign in by another
 method. Provider subjects and access/refresh tokens are not persisted. Account
 matching is by verified email on every sign-in, so a changed provider email can
 select a different account. Apple private-relay addresses are separate addresses.
-No migration is added, leaving `0002` available for Kenny's judge-room work.
+No migration is added (judge rooms, PR 4, take `0002`).
 
 ## Server setup
 
@@ -32,7 +32,7 @@ Public keys are cached for five minutes; a newly rotated key can be rejected
 until that cache expires. Requests time out after ten seconds and never follow
 redirects carrying credentials. TLS roots are bundled for Kenny's scratch image.
 
-The production domain is `.com` (confirmed by Ricky on 2026-11-21).
+The production domain is `geauxhack.org` (confirmed by Ricky on 2026-11-21).
 Register exactly `https://app.geauxhack.org/auth/callback` with each provider
 (or the deployed `AuthState.origin` plus `/auth/callback`). Use the Google web
 OAuth client for this server-mediated flow on both web and native. Native launches
@@ -130,11 +130,8 @@ Apple or the full web/iOS/Android criterion complete from fixture tests alone.
 PR 2 owns email/SMS delivery acceptance; judge-room timing/access and general
 offline-startup acceptance belong to their respective PRs.
 
-After extending OAuth session/revocation and linking assertions on 2026-11-21, all **36**
-combined auth/code/OAuth tests passed, along with Clippy (`--all-targets -- -D warnings`)
-and the release library check (`--release --lib`). The acceptance pass reviewed the new assertions and scoped the no-referrer check
-to OAuth responses (the helper also calls email-code verification). No production
-implementation changes were needed. OAuth formatting uses the existing compact layout:
+`cargo test -p auth`, Clippy (`--all-targets -- -D warnings`) and the release library
+check (`--release --lib`) pass. OAuth formatting uses the existing compact layout:
 
 ```sh
 rustfmt --edition 2021 --config max_width=120,use_small_heuristics=Max --check auth/src/oauth.rs

@@ -25,7 +25,7 @@ async fn setup(schema: &str) -> Arc<AuthState> {
         .unwrap();
     redis.init().await.unwrap();
     // Other tests use a separate IP for rate-limit assertions.
-    let _: i64 = redis.del(format!("gh:oauth:rl:192.0.2.10:{}", NOW / 3600)).await.unwrap();
+    let _: i64 = redis.del(format!("gh:rl:oauth-start-ip:3600:192.0.2.10:{}", NOW / 3600)).await.unwrap();
     Arc::new(AuthState {
         keys: crate::Keys::new(SigningKey::from_bytes(&[1; 32]), vec![]),
         origin: ORIGIN.into(),
@@ -294,7 +294,7 @@ async fn rejects_unverified_email_and_provider_failures_without_creating_users()
 async fn starts_are_rate_limited_and_fail_closed_without_a_client_ip_or_redis() {
     let mut state = setup("oauth_limits").await;
     configure(&mut state, Provider::Github, "http://127.0.0.1:1");
-    let key = format!("gh:oauth:rl:192.0.2.200:{}", NOW / 3600);
+    let key = format!("gh:rl:oauth-start-ip:3600:192.0.2.200:{}", NOW / 3600);
     state
         .sessions
         .redis

@@ -19,9 +19,11 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
-use crate::{AuthState, Dest};
+use crate::{codes::limit, AuthState, Dest};
 
 const TTL: i64 = 600;
+/// Starts per IP per hour, sized like the code limits for one shared venue Wi-Fi IP.
+const START_PER_IP: (&str, i64, i64) = ("oauth-start-ip", 3600, 300);
 type Error = StatusCode;
 const DOWN: Error = StatusCode::SERVICE_UNAVAILABLE;
 const INVALID: Error = StatusCode::UNAUTHORIZED;
@@ -291,19 +293,7 @@ async fn start(
         return Err(StatusCode::BAD_REQUEST);
     }
     let ip = crate::routes::client_ip(&headers, peer).ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-    let count: i64 = state
-        .sessions
-        .redis
-        .eval(
-            "local n = redis.call('INCR', KEYS[1]); if n == 1 then redis.call('EXPIRE', KEYS[1], 3600) end; return n",
-            vec![format!("gh:oauth:rl:{ip}:{}", (state.now)() / 3600)],
-            Vec::<String>::new(),
-        )
-        .await
-        .map_err(|_| DOWN)?;
-    if count > 300 {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
-    }
+    limit(&state.sessions.redis, START_PER_IP, &ip, (state.now)()).await.map_err(|e| e.status())?;
     let id = random()?;
     let pending = Pending { provider, challenge: input.code_challenge, nonce: random()?, web: web(&state, &headers) };
     let mut url = Url::parse(&config.authorize).map_err(|_| DOWN)?;

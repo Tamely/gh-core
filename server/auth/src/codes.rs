@@ -319,7 +319,7 @@ fn new_code() -> String {
 }
 
 /// Fixed windows by `now`, so tests can move a fake clock. Redis expires old windows.
-async fn limit(redis: &Client, (name, window, max): (&str, i64, i64), who: &str, now: i64) -> Result<(), CodeError> {
+pub(crate) async fn limit(redis: &Client, (name, window, max): (&str, i64, i64), who: &str, now: i64) -> Result<(), CodeError> {
     let key = format!("gh:rl:{name}:{window}:{who}:{}", now / window);
     let n: i64 = redis.eval(HIT, key, window).await.map_err(down)?;
     if n > max {
