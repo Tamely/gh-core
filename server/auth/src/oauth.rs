@@ -448,3 +448,7 @@ async fn apple_callback(
     }
     Ok(Redirect::to(url.as_str()))
 }
+
+#[cfg(test)]
+#[path = "oauth/tests.rs"]
+mod tests;
