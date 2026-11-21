@@ -8,9 +8,12 @@ _Last updated: 2026-11-20_
 **Database hosting** (assigned 2026-11-20). **Dev: local Docker** via `server/docker-compose.yml` (`pgvector/pgvector:pg16` + Redis 7, both on `127.0.0.1`, dev-only password; placeholder until Kenny's compose file lands). **QA/prod: the DigitalOcean droplet** (1 vCPU / 1GB for now, resize to ≥ 2 vCPU / 4GB before the January mock run; keep CPU/RAM-only resize so it can shrink back). Droplet not started. Plan: lock down the droplet (SSH keys only, firewall allows only SSH and later 80/443), Docker Compose with `pgvector/pgvector:pg16` and Redis 7 (no persistence) both listening on `127.0.0.1` only, a non-admin `ghcore_app` role, teammates reach it through an SSH tunnel, nightly `pg_dump` to DigitalOcean Spaces (hourly during the event) with a tested restore, monitoring alerts.
 
 ## Status
-**PR 1a in progress** on branch `ricky/auth-tokens` (fork `liangricky7/gh-core`, not pushed). Steps 1–3 below are written; nothing committed yet.
+**PR 1a committed** (`1bb55aa` on `ricky/auth-tokens`, fork `liangricky7/gh-core`, not pushed). PR 1b in progress.
 
-Kenny's server branches aren't pushed, so `server/Cargo.toml` is a **placeholder workspace** with only `auth` in it. The migration test makes a stand-in `users (id)` table in place of Kenny's 0001. When his stack lands: keep his `server/Cargo.toml` and add `"auth"` to its members, move `server/auth/migrations/0002_auth.sql` into his migrations folder with his numbering, and mount `auth::routes(keys)` in his router.
+**Order (from Ricky's senior dev, 2026-11-20): all five auth PRs and the Postgres host are finished and pushed before Kenny pushes his server stack.** Local Docker counts as the host for now; it will most likely have to be the droplet. So auth lands on `main` first and Kenny builds on it:
+- `server/Cargo.toml` and `server/docker-compose.yml` are the **real** files. Kenny merges his members and services into them.
+- `server/migrations/0001_users_and_auth.sql` is the **first** migration and creates a minimal `users` table. Kenny's spec migration becomes 0002 and **adds** his columns to `users` instead of creating it.
+- Auth is a set of building blocks with no server around it, tested on a small stand-in router: `auth::layer` (who is calling), the policy map and default deny, revocation, and a topic check for WebSockets. Kenny's realtime PR calls the topic check in place of `auth::AllowAll`, and mounts `auth::routes` and `auth::layer` in his router.
 
 No Rust toolchain on Ricky's Mac yet: tests run in Docker (`rust:1-slim-bookworm`, Postgres from `pgvector/pgvector:pg16`):
 ```
@@ -23,10 +26,10 @@ Proposed split into two stacked PRs: **1a = steps 1–3** (no request-path code)
 
 | # | Step | Proves | Test |
 |---|---|---|---|
-| 1 | Migration `0002_auth.sql`: `user_roles` (HACKER/VOLUNTEER/MENTOR/ADMIN; JUDGE_ROOM is session-only), `sessions` (`id` = `sid`) | Loads on top of Kenny's schema | Bad role / duplicate / expiry before creation rejected; deleting a user cascades |
+| 1 | Migration `server/migrations/0001_users_and_auth.sql`: minimal `users` (verified lowercase email and/or E.164 phone), `user_roles` (HACKER/VOLUNTEER/MENTOR/ADMIN; JUDGE_ROOM is session-only), `sessions` (`id` = `sid`) | Loads as the first migration | Bad role / duplicate / expiry before creation rejected; deleting a user cascades |
 | 2 | Ed25519 JWT issue/verify (`server/auth/src/token.rs`), `kid` = RFC 7638 thumbprint, old public keys accepted | Mint tokens, reject every bad one | Table test: tampered, wrong key, `alg: none`/`HS256`, unknown `kid`, expired (fake clock), old key OK |
 | 3 | `GET /.well-known/jwks.json` (`auth::routes`) | Others can verify with public info only | `jsonwebtoken` verifies our token using only the JWKS; no `d` in output |
-| 4 | Caller extraction: `__Host-session` cookie or `Authorization: Bearer`; `Origin` = `https://app.geauxhack.com` on cookie requests that change data | Every request is a known caller or anonymous | Cookie, Bearer, none, garbage, cross-origin POST → 403 |
+| 4 | **Done** (`auth::layer`, `auth::identify`). Caller extraction: `__Host-session` cookie or `Authorization: Bearer`; `Origin` = `https://app.geauxhack.com` on cookie requests that change data | Every request is a known caller or anonymous | Cookie, Bearer, none, garbage, cross-origin POST → 403 |
 | 5 | Sessions + revocation: logout, admin revoke, Redis `gh:revoked:{sid}` with TTL, Postgres fallback on Redis error (both down → 503), reload on startup, sliding renewal under 7 days | Revoke works on the next request, even across Redis restarts/outages | Revoke → 401; flush+restart → 401; Redis down → 401; day 6 / 8 / 15 with fake clock |
 | 6 | Policies + default deny: one global layer looks up the matched path in a policy map (`Public`, `RequireRole`, `RequireRoom`); no entry → 403. Kenny's `/healthz`, `/readyz` are `Public`. First route `GET /api/v1/me` | A forgotten route is locked | Per-policy unit tests; unlisted route → 403 |
 | 7 | WebSocket auth replacing Kenny's `auth::AllowAll`: web = cookie + `Origin` check; native = token as first message (never in the URL, which gets logged). `user:{id}` self only, `room:{id}` that room's judges + admins, `team:*` / `mentor-tag:*` admin only until their tables exist | Live updates no longer open to anyone | Topic × caller tests |
@@ -72,7 +75,7 @@ Proposed split into two stacked PRs: **1a = steps 1–3** (no request-path code)
 ## Needs from others
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
-| Kenny | **Push the server stack** (at least `kenny/server-skeleton` and `kenny/server-database`) | PR 1b wires auth into your router, `db::acquire` and Redis; 1a only uses a placeholder workspace | before PR 1b |
+| Kenny | **Rebase onto auth once it's on `main`** (per Ricky's senior dev, auth and Postgres land first). Your §5 migration becomes 0002: `users` already exists from `0001_users_and_auth.sql` (`id`, `email`, `phone_e164`, `created_at`), so ALTER it to add your columns. Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
 | Kenny | You take `POST /api/v1/notify` next; Ricky is on auth. | Answers "notify or auth next" in your handoff | — |
 | Kenny / database | Make `users.phone_e164`, `full_name`, `school`, `qr_hmac_sig` nullable (or filled later). A first Google/GitHub/Apple or email-code sign-in has none of them. | OAuth and codes PRs can't create users | before PR 2 |
 | Kenny / database | `presentation_rooms.panel_hmac_token` stores the judge token itself. The ticket says store only a token **version** and a token **hash**, plus a judging window (start/end). | Judge rooms PR | before PR 4 |

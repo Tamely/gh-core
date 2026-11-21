@@ -1,5 +1,4 @@
-# Local dev databases. Placeholder until Kenny's kenny/server-database lands with his own
-# docker-compose.yml; keep his and drop this one if they differ.
+# Local dev databases. Kenny merges his services in here when he rebases.
 #   docker compose -f server/docker-compose.yml up -d
 #   DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
 #   REDIS_URL=redis://127.0.0.1:6379

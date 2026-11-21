@@ -1,5 +1,4 @@
-# Placeholder for Kenny's Cargo workspace (kenny/server-skeleton, not pushed yet).
-# When his stack lands, keep his file and add "auth" to its members.
+# gh-core server workspace. Auth lands first; Kenny's server crates join `members` when he rebases.
 [workspace]
 resolver = "2"
 members = ["auth"]
