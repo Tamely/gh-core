@@ -53,6 +53,9 @@ pub fn policies() -> Policies {
         // The socket checks the caller itself (cookie on upgrade, or the first
         // message on native) with `auth::ws_caller` / `auth::ws_first_message`.
         ("GET /api/v1/ws", Policy::Public),
+        // Sign-in by code. Rate limited inside, per address and per IP.
+        ("POST /api/v1/auth/code", Policy::Public),
+        ("POST /api/v1/auth/code/verify", Policy::Public),
         ("GET /api/v1/me", Policy::SignedIn),
         ("POST /api/v1/auth/logout", Policy::SignedIn),
         ("POST /api/v1/admin/users/{id}/revoke-sessions", Policy::RequireRole(vec![Role::Admin])),

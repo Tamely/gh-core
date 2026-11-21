@@ -20,6 +20,9 @@ const ADMIN_ONLY: [u16; 10] = [401, 403, 403, 403, 204, 403, 403, 403, 401, 401]
 // Room A: its judges and admins.
 const ROOM_A: [u16; 10] = [401, 403, 403, 403, 200, 200, 403, 403, 401, 401];
 const NO_POLICY: [u16; 10] = [403; 10];
+// Public, so every caller reaches the handler, which rejects the matrix's empty
+// body (no JSON content type). Sign-in itself is tested in tests/codes.rs.
+const PUBLIC_JSON: [u16; 10] = [415; 10];
 
 #[tokio::test]
 async fn route_by_role_matrix() {
@@ -48,6 +51,8 @@ async fn route_by_role_matrix() {
         ("GET /healthz", "GET", "/healthz", PUBLIC),
         ("GET /readyz", "GET", "/readyz", PUBLIC),
         ("GET /api/v1/ws", "GET", "/api/v1/ws", PUBLIC),
+        ("POST /api/v1/auth/code", "POST", "/api/v1/auth/code", PUBLIC_JSON),
+        ("POST /api/v1/auth/code/verify", "POST", "/api/v1/auth/code/verify", PUBLIC_JSON),
         ("GET /api/v1/me", "GET", "/api/v1/me", SIGNED_IN),
         ("POST /api/v1/auth/logout", "POST", "/api/v1/auth/logout", SIGNED_IN.map(|s| if s == 200 { 204 } else { s })),
         ("POST /api/v1/admin/users/{id}/revoke-sessions", "POST", &revoke, ADMIN_ONLY),

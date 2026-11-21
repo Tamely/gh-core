@@ -15,7 +15,7 @@ async fn jwks_lets_another_library_verify_our_tokens() {
     let keys = Keys::new(SigningKey::from_bytes(&[1; 32]), vec![old]);
     // Public route: works with both databases down.
     let sessions = Sessions::new(dead_db(), dead_redis().await);
-    let state = Arc::new(AuthState { keys, origin: ORIGIN.into(), now: || NOW, sessions, policies: policies() });
+    let state = Arc::new(AuthState { keys, origin: ORIGIN.into(), now: || NOW, sessions, policies: policies(), codes: log_codes() });
 
     let res = call(&app(state.clone(), Router::new()), "GET", "/.well-known/jwks.json", &[]).await;
     assert_eq!(res.status, 200);

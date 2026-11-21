@@ -16,7 +16,7 @@ use axum::{
     RequestExt,
 };
 
-use crate::{Claims, Keys, Policies, Policy, Sessions, SESSION_SECS};
+use crate::{Claims, Codes, Keys, Policies, Policy, Sessions, SESSION_SECS};
 
 /// Web session cookie. `__Host-` makes browsers insist on Secure, Path=/ and no Domain.
 pub const COOKIE: &str = "__Host-session";
@@ -46,6 +46,8 @@ pub struct AuthState {
     pub sessions: Sessions,
     /// Start from `auth::policies()` and add every server route.
     pub policies: Policies,
+    /// Email and SMS sign-in codes.
+    pub codes: Codes,
 }
 
 /// `Set-Cookie` value for a session token. `Max-Age=0` with an empty token clears it.

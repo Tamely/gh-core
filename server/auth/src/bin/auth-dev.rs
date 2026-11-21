@@ -2,7 +2,9 @@
 //! doesn't build this binary. Lets you try signed-in requests before sign-in exists.
 //!
 //!   auth-dev mint ADMIN [email]   create the user if needed, give it the role, print a token
-//!   auth-dev serve                auth's routes on http://127.0.0.1:8080
+//!   auth-dev serve                auth's routes on http://127.0.0.1:8080; sign-in codes
+//!                                 go out through Postmark / Twilio when their variables
+//!                                 are set (server/.env.example), else print here
 //!
 //! Both use a fixed dev signing key, so tokens from `mint` only work on `serve`.
 //! Needs DATABASE_URL and REDIS_URL (the dev databases from docker-compose.yml).
@@ -12,7 +14,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auth::{layer, policies, routes, AuthState, Keys, Role, Sessions};
+use auth::{layer, policies, routes, user_for, AuthState, Codes, Dest, Keys, Role, Sessions};
 use ed25519_dalek::SigningKey;
 use fred::prelude::{Builder, ClientLike, Config};
 
@@ -36,6 +38,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    if !cfg!(debug_assertions) {
+        return Err("auth-dev is a debug build only (cargo run, not --release)".into());
+    }
     let env = |name: &str| std::env::var(name).map_err(|_| format!("set {name}"));
     let url = env("DATABASE_URL")?;
     // Refuse anything but the compose database (this machine, port 5432), so a
@@ -60,20 +65,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         now,
         sessions: Sessions::new(db, redis),
         policies: policies(),
+        codes: Codes::from_env()?,
     });
 
     match args[..] {
         ["mint", role, ref rest @ ..] => {
             let role = role.to_uppercase();
-            let email = rest.first().copied().unwrap_or("dev@example.com").to_lowercase();
+            let email = rest.first().copied().unwrap_or("dev@example.com");
+            let to = Dest::email(email).ok_or(format!("not an email: {email}"))?;
             let db = &state.sessions.db;
-            let id: String = sqlx::query_scalar(
-                "INSERT INTO users (email) VALUES ($1)
-                 ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id::text",
-            )
-            .bind(&email)
-            .fetch_one(db)
-            .await?;
+            let id = user_for(db, &to).await?;
             sqlx::query("INSERT INTO user_roles (user_id, role) VALUES ($1::uuid, $2) ON CONFLICT DO NOTHING")
                 .bind(&id)
                 .bind(&role)
@@ -88,7 +89,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let addr = std::env::var("AUTH_DEV_ADDR").unwrap_or("127.0.0.1:8080".into());
             let listener = tokio::net::TcpListener::bind(&addr).await?;
             eprintln!("auth-dev serving on http://{addr}");
-            axum::serve(listener, app).await?;
+            // With connect info, so rate limits see each caller's IP.
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
         }
         _ => unreachable!("checked above"),
     }

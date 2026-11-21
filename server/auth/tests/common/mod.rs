@@ -3,9 +3,13 @@
 //!   DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres REDIS_URL=redis://127.0.0.1:6379 cargo test -p auth
 #![allow(dead_code)]
 
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    str::FromStr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use auth::{layer, policies, routes, AuthState, Keys, Role, Sessions};
+use auth::{layer, policies, routes, AuthState, Codes, Keys, Role, Sender, Sessions};
 use axum::{body::Body, http::Request, middleware::from_fn_with_state, Router};
 use ed25519_dalek::SigningKey;
 use fred::prelude::{Builder, Client, ClientLike, Config};
@@ -81,7 +85,15 @@ pub async fn user(db: &PgPool, email: &str, roles: &[Role]) -> String {
 }
 
 pub fn state(db: PgPool, redis: Client, now: fn() -> i64) -> Arc<AuthState> {
-    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions::new(db, redis), policies: policies() })
+    state_with(db, redis, now, log_codes())
+}
+
+pub fn state_with(db: PgPool, redis: Client, now: fn() -> i64, codes: Codes) -> Arc<AuthState> {
+    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions::new(db, redis), policies: policies(), codes })
+}
+
+pub fn log_codes() -> Codes {
+    Codes::new(Sender::Log, Sender::Log)
 }
 
 /// Auth's routes plus `extra`, under the auth layer, like the real server.
@@ -96,13 +108,100 @@ pub struct Res {
 }
 
 pub async fn call(app: &Router, method: &str, uri: &str, headers: &[(&str, &str)]) -> Res {
+    call_body(app, method, uri, headers, "").await
+}
+
+/// `call` with a request body (set `content-type` yourself).
+pub async fn call_body(app: &Router, method: &str, uri: &str, headers: &[(&str, &str)], body: &str) -> Res {
     let mut req = Request::builder().method(method).uri(uri);
     for (name, value) in headers {
         req = req.header(*name, *value);
     }
-    let res = app.clone().oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+    let res = app.clone().oneshot(req.body(Body::from(body.to_string())).unwrap()).await.unwrap();
     let status = res.status().as_u16();
     let headers = res.headers().clone();
     let body = axum::body::to_bytes(res.into_body(), 1 << 16).await.unwrap();
     Res { status, headers, body: String::from_utf8(body.to_vec()).unwrap() }
+}
+
+/// Random hex, so emails, phones and IPs don't collide with earlier test runs
+/// (rate limits and codes live in Redis for up to an hour).
+pub fn random() -> String {
+    let mut b = [0u8; 8];
+    getrandom::getrandom(&mut b).unwrap();
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// A stand-in for Postmark and Twilio Verify on a local port. It records every
+/// request; Twilio's check approves exactly the code `123456`. Failures on cue:
+/// email `bounced-*` (Postmark 422/406), `unconfirmed-*` (422/400), `busy-*` (429);
+/// phones `+1500*` (Twilio 400, a landline); check code `999999` (a 200 that isn't JSON).
+pub struct Fake {
+    pub url: String,
+    pub seen: Arc<Mutex<Vec<Seen>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct Seen {
+    pub path: String,
+    pub headers: axum::http::HeaderMap,
+    pub body: String,
+}
+
+pub async fn fake_provider() -> Fake {
+    use axum::http::{StatusCode, Uri};
+    let seen = Arc::new(Mutex::new(vec![]));
+    let log = seen.clone();
+    let app = Router::new().fallback(move |uri: Uri, headers: axum::http::HeaderMap, body: String| {
+        let log = log.clone();
+        async move {
+            let path = uri.path().to_string();
+            log.lock().unwrap().push(Seen { path: path.clone(), headers, body: body.clone() });
+            if body.contains("bounced-") {
+                (StatusCode::UNPROCESSABLE_ENTITY, r#"{"ErrorCode":406,"Message":"inactive recipient"}"#)
+            } else if body.contains("unconfirmed-") {
+                (StatusCode::UNPROCESSABLE_ENTITY, r#"{"ErrorCode":400,"Message":"sender signature not confirmed"}"#)
+            } else if body.contains("busy-") {
+                (StatusCode::TOO_MANY_REQUESTS, "{}")
+            } else if body.contains("To=%2B1500") {
+                (StatusCode::BAD_REQUEST, r#"{"code":60205}"#)
+            } else if body.contains("Code=999999") {
+                (StatusCode::OK, "<html>bad gateway</html>")
+            } else if path.ends_with("/Verifications") {
+                (StatusCode::CREATED, r#"{"status":"pending"}"#)
+            } else if path.ends_with("/VerificationCheck") && body.contains("Code=123456") {
+                (StatusCode::OK, r#"{"status":"approved"}"#)
+            } else if path.ends_with("/VerificationCheck") {
+                (StatusCode::OK, r#"{"status":"pending"}"#)
+            } else {
+                (StatusCode::OK, "{}")
+            }
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    Fake { url, seen }
+}
+
+/// Postmark for email and Twilio Verify for SMS, both pointed at `fake`.
+pub fn fake_codes(fake: &Fake) -> Codes {
+    Codes::new(
+        Sender::Postmark { api: fake.url.clone(), token: "pm-token".into(), from: "codes@geauxhack.com".into() },
+        Sender::TwilioVerify {
+            api: fake.url.clone(),
+            account_sid: "AC123".into(),
+            auth_token: "tw-token".into(),
+            service_sid: "VA123".into(),
+        },
+    )
+}
+
+/// The code in the last email the fake received.
+pub fn last_code(fake: &Fake) -> String {
+    let seen = fake.seen.lock().unwrap();
+    let email: serde_json::Value = serde_json::from_str(&seen.last().expect("an email was sent").body).unwrap();
+    let text = email["TextBody"].as_str().unwrap();
+    let start = text.find(|c: char| c.is_ascii_digit()).unwrap();
+    text[start..start + 6].to_string()
 }
