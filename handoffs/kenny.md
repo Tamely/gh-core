@@ -26,9 +26,12 @@ What's built is the foundation: startup checks, migrations, health and metrics, 
 **`POST /api/v1/notify`** (assigned in Ricky's handoff) is built on `kenny/notify`, on top of this stack, local only. It stores `{ "email" }` (trimmed, lowercased) in `notify_signups` and answers 204 whether or not the address was new, so the form can't reveal who signed up. Bad input gets 400/413/415/422, and 10 new addresses per client per hour gets 429. CORS allows only `https://geauxhack.com`, and the body is capped at 1KB. The limit is counted in Postgres per `X-Real-IP`; requests without it share one bucket. When wiring auth: give `POST /api/v1/notify` a `Public` policy and keep its CORS layer outside `auth::layer`, or the browser's `OPTIONS` preflight gets 403.
 
 **Rebase onto auth, accepted from `handoffs/ricky.md`:**
-- Use auth's `server/Cargo.toml`, `server/docker-compose.yml` and `server/migrations/` (moving mine from `server/app/migrations/`). My schema becomes `0002` and ALTERs auth's `users` instead of creating it.
-- `users.phone_e164`, `full_name`, `school`, `qr_hmac_sig` become nullable (a first OAuth or email-code sign-in has none of them). Before auth PR 2.
-- `presentation_rooms`: auth PR 4 creates a minimal table; my migration adds the rest and stores a judge token hash and version plus a judging window instead of `panel_hmac_token` (the raw token). Before auth PR 4.
+- Use auth's `server/Cargo.toml`, `server/docker-compose.yml` and `server/migrations/` (moving mine from `server/app/migrations/`). My schema becomes `0002` and ALTERs auth's `users` instead of creating it. The `notify_signups` table goes into `0002` too. Ricky's PR 2 adds no migration and `0003` is reserved for his OAuth PR, so anything after `0002` starts at `0004`.
+- `users.email`, `phone_e164`, `full_name`, `school`, `qr_hmac_sig` stay nullable (an SMS-only sign-up has no email; a first OAuth or code sign-in has none of the rest). Before auth PR 2.
+- `presentation_rooms` is created by my `0002` with a judge token hash, a token version and a judging window (start/end), and no `panel_hmac_token` (the raw token).
+- One CORS layer for the whole router, outside `auth::layer` (`OPTIONS` isn't in the policy map, so a preflight inside it gets 403). Origins: `https://geauxhack.com` (landing page), `capacitor://localhost` (iOS app), `https://localhost` (Android app). Replaces the notify-only layer.
+
+**Auth PR 4 (judge room access) is mine** (Ricky, 2026-11-21). Ricky's doc "Auth PR 4: Judge Room Access" is the spec; ignore its minimal `presentation_rooms` table, since `0002` creates the real one. Its migration is `0004` or later.
 - Wire `AuthState` (shared pool and fred client), `sessions.reload(now)` at startup, `auth::routes`, a policy for each route, `.layer(auth::layer)` last, and auth's WebSocket checks instead of `AllowAll`. The fred client already has the 1s command timeout auth needs.
 
 Decided by the team:
@@ -95,7 +98,8 @@ Checked against Josh's three draft branches (2026-11-18): all merge cleanly with
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
 | josh | Either add `server/` to `.prettierignore`, or confirm the backend should follow Prettier for its Markdown and YAML. Your CI runs `prettier --check .` on every PR with no path filter, and `server/README.md` fails it, so each backend PR would fail your check once it's on `main`. | Backend PRs passing CI | before PR 1.1 merges |
-| infra | The reverse proxy sets `X-Real-IP` to the client's address on every request to the API, overwriting any value the client sent (nginx: `proxy_set_header X-Real-IP $remote_addr;`) | The notify form's per-client limit; without it every visitor shares one limit of 10 an hour | before the landing page goes public |
+| infra | nginx sets both `proxy_set_header X-Real-IP $remote_addr;` (notify) and `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (Ricky's PR 2 reads the last entry), and the API listens only on `127.0.0.1` or is firewalled so nobody can skip nginx and fake them. Settle on one header later. | Per-client rate limits on notify and sign-in codes | before the landing page goes public |
+| josh | Write access to Tamely/gh-core for me (Ricky needs it too) | Opening the six stacked PRs; PR #4 had to come from my fork | before auth lands |
 | infra | Container stop grace period of at least 20s, the load balancer polling `/readyz`, `/api/v1/ws` routed with WebSocket upgrades, port 9090 kept internal | Zero-downtime deploys; 15s drain | before the January mock run |
 | database | Schema gaps in design doc §5: a team membership table, `sponsor_keys`, a table for photo face embeddings, and loan history in `hardware_loans` | Later backend PRs (auth, scanning) | 2026-11-24 |
 | auth | Replace `auth::AllowAll` with real rules. Covered by Tamely/gh-core#7 (`ws_caller`, `ws_first_message`, `may_subscribe`); I wire them in when rebasing. Remove this row once #7 merges. | Live updates are open to anyone until then | with the auth PR |
