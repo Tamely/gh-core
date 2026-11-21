@@ -12,6 +12,10 @@ ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
 fred = { version = "10", features = ["i-scripts"] }
 # OS randomness for sign-in codes (already in the tree through ed25519-dalek).
 getrandom = "0.2"
+# HMAC for judge placard tokens (already in the tree through sqlx's Postgres auth).
+hmac = "0.12"
+# QR codes for the placards, as SVG (judge-admin only).
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # Postmark and Twilio calls. 0.12 with rustls + webpki roots: the CA list is built in,
 # so it works in Kenny's FROM scratch image (0.13 reads the system's CAs, which that image lacks).
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

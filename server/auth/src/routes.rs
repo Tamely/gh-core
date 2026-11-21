@@ -42,6 +42,7 @@ pub fn routes(state: Arc<AuthState>) -> Router {
         .route("/api/v1/me", get(me))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/admin/users/{id}/revoke-sessions", post(revoke_user))
+        .route("/api/v1/judge/exchange", post(crate::judge::exchange))
         .with_state(state)
 }
 
@@ -72,7 +73,7 @@ impl CodeRequest {
 /// our own proxy added; earlier ones are whatever the client sent), else the TCP peer.
 /// `None` means the server is wired wrong (no proxy header and no
 /// `into_make_service_with_connect_info`); guessing would put everyone in one bucket.
-fn client_ip(headers: &HeaderMap, peer: Option<Extension<ConnectInfo<SocketAddr>>>) -> Option<String> {
+pub(crate) fn client_ip(headers: &HeaderMap, peer: Option<Extension<ConnectInfo<SocketAddr>>>) -> Option<String> {
     let forwarded = headers
         .get_all("x-forwarded-for")
         .iter()

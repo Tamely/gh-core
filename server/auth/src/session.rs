@@ -83,6 +83,11 @@ impl Sessions {
         self.revoke_where("user_id = $1::uuid", user_id, now).await
     }
 
+    /// Placard rotated: revokes every judge session for that room.
+    pub async fn revoke_room(&self, room_id: &str, now: i64) -> Result<(), Unavailable> {
+        self.revoke_where("room_id = $1", room_id, now).await
+    }
+
     /// `Unavailable` only if Postgres failed (nothing was revoked; retry). Once the
     /// database says revoked it's done: if Redis can't take it, "ready" is dropped
     /// so lookups go to Postgres, and the cache write is retried in the background.

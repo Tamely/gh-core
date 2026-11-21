@@ -16,7 +16,7 @@ use axum::{
     RequestExt,
 };
 
-use crate::{Claims, Codes, Keys, Policies, Policy, Sessions, SESSION_SECS};
+use crate::{Claims, Codes, JudgeKey, Keys, Policies, Policy, Sessions, SESSION_SECS};
 
 /// Web session cookie. `__Host-` makes browsers insist on Secure, Path=/ and no Domain.
 pub const COOKIE: &str = "__Host-session";
@@ -48,11 +48,17 @@ pub struct AuthState {
     pub policies: Policies,
     /// Email and SMS sign-in codes.
     pub codes: Codes,
+    /// K_judge, for room placard tokens.
+    pub judge: JudgeKey,
 }
 
 /// `Set-Cookie` value for a session token. `Max-Age=0` with an empty token clears it.
 pub fn session_cookie(token: &str) -> HeaderValue {
-    let max_age = if token.is_empty() { 0 } else { SESSION_SECS };
+    cookie_with_age(token, if token.is_empty() { 0 } else { SESSION_SECS })
+}
+
+/// The session cookie, kept for `max_age` seconds (a judge's ends with judging).
+pub(crate) fn cookie_with_age(token: &str, max_age: i64) -> HeaderValue {
     let cookie = format!("{COOKIE}={token}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}");
     HeaderValue::from_str(&cookie).expect("a JWT is valid in a header")
 }

@@ -31,6 +31,9 @@ async fn route_by_role_matrix() {
     // Stand-in route that needs a room; the real ones come with judging.
     Arc::get_mut(&mut state).unwrap().policies.insert("GET /api/v1/rooms/{room_id}/scores".into(), Policy::RequireRoom);
     state.sessions.reload(NOW).await.unwrap();
+    for room in ["room-a", "room-b"] {
+        auth::set_room(&db, &judge_key(), room, NOW - DAY, NOW + DAY).await.unwrap();
+    }
 
     // Kenny's routes, stood in by handlers that just say OK, plus one with no policy.
     let ok = get(|| async { "ok" });
@@ -53,6 +56,7 @@ async fn route_by_role_matrix() {
         ("GET /api/v1/ws", "GET", "/api/v1/ws", PUBLIC),
         ("POST /api/v1/auth/code", "POST", "/api/v1/auth/code", PUBLIC_JSON),
         ("POST /api/v1/auth/code/verify", "POST", "/api/v1/auth/code/verify", PUBLIC_JSON),
+        ("POST /api/v1/judge/exchange", "POST", "/api/v1/judge/exchange", PUBLIC_JSON),
         ("GET /api/v1/me", "GET", "/api/v1/me", SIGNED_IN),
         ("POST /api/v1/auth/logout", "POST", "/api/v1/auth/logout", SIGNED_IN.map(|s| if s == 200 { 204 } else { s })),
         ("POST /api/v1/admin/users/{id}/revoke-sessions", "POST", &revoke, ADMIN_ONLY),
@@ -71,7 +75,7 @@ async fn route_by_role_matrix() {
     for (_, method, path, expected) in &rows {
         for (who, want) in CALLERS.iter().zip(expected) {
             // A fresh session per cell, since logout and revoke use theirs up.
-            let token = caller_token(&state, &db, who).await;
+            let token = caller_token(&state, &db, &app, who).await;
             let headers: Vec<(&str, String)> = token.iter().map(|t| ("authorization", format!("Bearer {t}"))).collect();
             let headers: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (*k, v.as_str())).collect();
             let got = call(&app, method, path, &headers).await.status;
@@ -83,9 +87,10 @@ async fn route_by_role_matrix() {
     assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }
 
-async fn caller_token(state: &auth::AuthState, db: &sqlx::PgPool, who: &str) -> Option<String> {
+async fn caller_token(state: &auth::AuthState, db: &sqlx::PgPool, app: &Router, who: &str) -> Option<String> {
     let role = match who {
         "anon" => return None,
+        "judge A" | "judge B" => return Some(judge_token(app, if who == "judge A" { "room-a" } else { "room-b" }).await),
         "hacker" | "revoked" | "expired" => vec![Role::Hacker],
         "volunteer" => vec![Role::Volunteer],
         "mentor" => vec![Role::Mentor],
@@ -96,14 +101,17 @@ async fn caller_token(state: &auth::AuthState, db: &sqlx::PgPool, who: &str) -> 
     let id = user(db, &email, &role).await;
     let mut claims: Claims = state.sessions.start(&id, NOW).await.unwrap();
     match who {
-        // Judge sessions come from the judge exchange (PR 4); built by hand here.
-        "judge A" | "judge B" => {
-            claims.roles = vec![Role::JudgeRoom];
-            claims.room_id = Some(if who == "judge A" { "room-a" } else { "room-b" }.into());
-        }
         "revoked" => state.sessions.revoke(&claims.sid, NOW).await.unwrap(),
         "expired" => claims.exp = NOW - SESSION_SECS,
         _ => {}
     }
     Some(state.keys.issue(&claims))
+}
+
+/// A real judge session, from the placard exchange.
+async fn judge_token(app: &Router, room: &str) -> String {
+    let body = format!(r#"{{"token":"{}"}}"#, judge_key().placard(room, 1));
+    let res = call_body(app, "POST", "/api/v1/judge/exchange", &[("content-type", "application/json")], &body).await;
+    assert_eq!(res.status, 200, "{}", res.body);
+    serde_json::from_str::<serde_json::Value>(&res.body).unwrap()["token"].as_str().unwrap().into()
 }

@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use auth::{layer, policies, routes, AuthState, Codes, Keys, Role, Sender, Sessions};
+use auth::{layer, policies, routes, AuthState, Codes, JudgeKey, Keys, Role, Sender, Sessions};
 use axum::{body::Body, http::Request, middleware::from_fn_with_state, Router};
 use ed25519_dalek::SigningKey;
 use fred::prelude::{Builder, Client, ClientLike, Config};
@@ -24,6 +24,11 @@ pub fn keys() -> Keys {
     Keys::new(SigningKey::from_bytes(&[1; 32]), vec![])
 }
 
+/// K_judge for tests.
+pub fn judge_key() -> JudgeKey {
+    JudgeKey::new([9; 32])
+}
+
 /// A fresh schema with the migration loaded; the pool only sees that schema.
 pub async fn db(schema: &str) -> PgPool {
     let url = std::env::var("DATABASE_URL").expect("set DATABASE_URL (see tests/common/mod.rs)");
@@ -35,6 +40,7 @@ pub async fn db(schema: &str) -> PgPool {
     let opts = PgConnectOptions::from_str(&url).unwrap().options([("search_path", schema)]);
     let db = PgPool::connect_with(opts).await.unwrap();
     sqlx::raw_sql(include_str!("../../../migrations/0001_users_and_auth.sql")).execute(&db).await.unwrap();
+    sqlx::raw_sql(include_str!("../../../migrations/0002_judge_rooms.sql")).execute(&db).await.unwrap();
     db
 }
 
@@ -89,7 +95,7 @@ pub fn state(db: PgPool, redis: Client, now: fn() -> i64) -> Arc<AuthState> {
 }
 
 pub fn state_with(db: PgPool, redis: Client, now: fn() -> i64, codes: Codes) -> Arc<AuthState> {
-    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions::new(db, redis), policies: policies(), codes })
+    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions::new(db, redis), policies: policies(), codes, judge: judge_key() })
 }
 
 pub fn log_codes() -> Codes {

@@ -59,6 +59,8 @@ pub fn policies() -> Policies {
         ("GET /api/v1/me", Policy::SignedIn),
         ("POST /api/v1/auth/logout", Policy::SignedIn),
         ("POST /api/v1/admin/users/{id}/revoke-sessions", Policy::RequireRole(vec![Role::Admin])),
+        // A judge has no session yet; the placard token in the body is the credential.
+        ("POST /api/v1/judge/exchange", Policy::Public),
     ]
     .into_iter()
     .map(|(route, policy)| (route.to_string(), policy))

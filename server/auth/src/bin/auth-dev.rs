@@ -14,7 +14,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use auth::{layer, policies, routes, user_for, AuthState, Codes, Dest, Keys, Role, Sessions};
+use auth::{layer, policies, routes, user_for, AuthState, Codes, Dest, JudgeKey, Keys, Role, Sessions};
 use ed25519_dalek::SigningKey;
 use fred::prelude::{Builder, ClientLike, Config};
 
@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if let ["mint", role, ..] = args[..] {
         match serde_json::from_value::<Role>(role.to_uppercase().into()) {
-            Ok(Role::JudgeRoom) => return Err("JUDGE_ROOM sessions come from the judge exchange (PR 4)".into()),
+            Ok(Role::JudgeRoom) => return Err("JUDGE_ROOM sessions come from POST /api/v1/judge/exchange (see judge-admin)".into()),
             Ok(_) => {}
             Err(_) => return Err(format!("unknown role {role:?}; use HACKER, VOLUNTEER, MENTOR or ADMIN").into()),
         }
@@ -66,6 +66,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sessions: Sessions::new(db, redis),
         policies: policies(),
         codes: Codes::from_env()?,
+        // Set JUDGE_KEY to the same value for judge-admin to try placards here.
+        judge: match std::env::var("JUDGE_KEY") {
+            Ok(k) => JudgeKey::load(&k)?,
+            Err(_) => JudgeKey::new([8; 32]),
+        },
     });
 
     match args[..] {
