@@ -9,7 +9,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{
-    extract::{ConnectInfo, State},
+    extract::{rejection::JsonRejection, ConnectInfo, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Extension, Json,
@@ -34,7 +34,7 @@ impl JudgeKey {
         Self(key)
     }
 
-    /// 32 random bytes as base64url: `openssl rand 32 | base64 | tr '+/' '-_' | tr -d '='`.
+    /// 32 random bytes as base64 or base64url, e.g. `openssl rand 32 | base64`.
     pub fn load(b64: &str) -> Result<Self, String> {
         let bytes = B64.decode(b64.trim().trim_end_matches('=').replace('+', "-").replace('/', "_")).map_err(|_| "JUDGE_KEY is not base64url")?;
         let key = bytes.try_into().map_err(|_| "JUDGE_KEY must be 32 bytes")?;
@@ -118,37 +118,48 @@ pub(crate) async fn exchange(
     State(state): State<Arc<AuthState>>,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
-    Json(req): Json<ExchangeRequest>,
+    req: Result<Json<ExchangeRequest>, JsonRejection>,
 ) -> Response {
     let now = (state.now)();
     let db = &state.sessions.db;
     let user_agent = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).map(|s| s.chars().take(512).collect());
     let audit = Audit { now, user_agent, ip: client_ip(&headers, peer) };
 
-    let (room_id, version) = match state.judge.open(&req.token) {
+    // A body that isn't `{"token": "..."}` is rejected like a bad token.
+    let token = req.map(|Json(r)| r.token).unwrap_or_default();
+    let (room_id, version) = match state.judge.open(&token) {
         Ok(opened) => opened,
         Err((room, outcome)) => return audit.reject(db, room, outcome).await,
     };
+    let down = || StatusCode::SERVICE_UNAVAILABLE.into_response();
+    let Ok(mut tx) = db.begin().await else { return down() };
+    // FOR SHARE holds off a rotate until this session is written, so the
+    // rotate's revoke sees it; a rotate that got there first shows its new version.
     let room: Option<(i32, Option<i64>, Option<i64>)> = match sqlx::query_as(
         "SELECT token_version,
                 floor(extract(epoch FROM judging_starts_at))::bigint,
                 floor(extract(epoch FROM judging_ends_at))::bigint
-         FROM presentation_rooms WHERE room_id = $1",
+         FROM presentation_rooms WHERE room_id = $1 FOR SHARE",
     )
     .bind(&room_id)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(room) => room,
-        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Err(_) => return down(),
     };
-    let ends = match room {
-        None => return audit.reject(db, Some(room_id), Outcome::UnknownRoom).await,
-        Some((current, ..)) if i64::from(current) != i64::from(version) => {
-            return audit.reject(db, Some(room_id), Outcome::OldVersion).await
+    let rejected = match room {
+        None => Err(Outcome::UnknownRoom),
+        Some((current, ..)) if u32::try_from(current) != Ok(version) => Err(Outcome::OldVersion),
+        Some((_, Some(starts), Some(ends))) if starts <= now && now < ends => Ok(ends),
+        Some(_) => Err(Outcome::OutsideWindow),
+    };
+    let ends = match rejected {
+        Ok(ends) => ends,
+        Err(outcome) => {
+            drop(tx);
+            return audit.reject(db, Some(room_id), outcome).await;
         }
-        Some((_, Some(starts), Some(ends))) if starts <= now && now < ends => ends,
-        Some(_) => return audit.reject(db, Some(room_id), Outcome::OutsideWindow).await,
     };
 
     // Session and audit row in one statement, so one is never written without the other.
@@ -166,12 +177,15 @@ pub(crate) async fn exchange(
     .bind(ends)
     .bind(&audit.user_agent)
     .bind(&audit.ip)
-    .fetch_one(db)
+    .fetch_one(&mut *tx)
     .await
     {
         Ok(sid) => sid,
-        Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
+        Err(_) => return down(),
     };
+    if tx.commit().await.is_err() {
+        return down();
+    }
 
     // `sub` must be set and a judge has no user: `judge:` keeps it from passing for a user id.
     let claims =
@@ -262,7 +276,9 @@ pub async fn rotate(sessions: &Sessions, key: &JudgeKey, room_id: &str, now: i64
     if moved != 1 {
         return Err(format!("{room_id} was rotated by someone else at the same time; run it again"));
     }
-    sessions.revoke_room(room_id, now).await.map_err(|_| "placard rotated, but its sessions couldn't be revoked; run rotate again")?;
+    sessions.revoke_room(room_id, now).await.map_err(|_| {
+        format!("{room_id} has a new placard (judge-admin print shows it), but its old sessions couldn't be revoked; run rotate again")
+    })?;
     Ok(Some(token))
 }
 

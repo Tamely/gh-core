@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let link = url(&key.placard(&room, version as u32));
                 let qr = QrCode::new(link.as_bytes())?.render::<svg::Color>().min_dimensions(600, 600).build();
                 // Room ids are letters, digits, - and _ (the table checks), so safe as file names.
-                std::fs::write(format!("{dir}/{room}.svg"), qr)?;
+                write_private(&format!("{dir}/{room}.svg"), &qr)?;
                 let window = match (starts, ends) {
                     (Some(s), Some(e)) => format!("{s} to {e}"),
                     _ => "no judging window yet: the placard won't work".into(),
@@ -81,4 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => unreachable!("checked above"),
     }
     Ok(())
+}
+
+/// The QR codes are credentials: readable by this user only.
+fn write_private(path: &str, contents: &str) -> std::io::Result<()> {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?.write_all(contents.as_bytes())
 }

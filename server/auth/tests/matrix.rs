@@ -56,7 +56,8 @@ async fn route_by_role_matrix() {
         ("GET /api/v1/ws", "GET", "/api/v1/ws", PUBLIC),
         ("POST /api/v1/auth/code", "POST", "/api/v1/auth/code", PUBLIC_JSON),
         ("POST /api/v1/auth/code/verify", "POST", "/api/v1/auth/code/verify", PUBLIC_JSON),
-        ("POST /api/v1/judge/exchange", "POST", "/api/v1/judge/exchange", PUBLIC_JSON),
+        // No placard in the body: the same 401 as a bad one.
+        ("POST /api/v1/judge/exchange", "POST", "/api/v1/judge/exchange", [401; 10]),
         ("GET /api/v1/me", "GET", "/api/v1/me", SIGNED_IN),
         ("POST /api/v1/auth/logout", "POST", "/api/v1/auth/logout", SIGNED_IN.map(|s| if s == 200 { 204 } else { s })),
         ("POST /api/v1/admin/users/{id}/revoke-sessions", "POST", &revoke, ADMIN_ONLY),

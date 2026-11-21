@@ -112,6 +112,9 @@ async fn judge_rooms() {
     assert!(cookie.starts_with("__Host-session=") && cookie.contains("HttpOnly"), "{cookie}");
     assert!(cookie.ends_with(&format!("Max-Age={}", END - START - 60)), "{cookie}");
     assert!(body(&res).get("token").is_none());
+    // Another site's page gets no cookie, and the browser won't let it read the body.
+    let res = exchange(&app, &placard, &[("origin", "https://evil.example")]).await;
+    assert!(res.headers.get("set-cookie").is_none() && body(&res)["token"].is_string());
 
     // Logout revokes a judge session like any other: 401 on its next request.
     let t = session(&app, &placard).await;
@@ -176,6 +179,7 @@ async fn judge_rooms() {
             (room, "ok"),
             (room, "ok"),
             (room, "ok"),
+            (room, "ok"),
             (room, "bad_signature"),
             (Some("QFT-1200"), "bad_signature"),
             (None, "malformed"),
@@ -193,7 +197,7 @@ async fn judge_rooms() {
         assert_eq!((ua.as_deref(), ip.as_deref()), (Some(UA), Some(IP)));
         assert_eq!(*has_session, outcome == "ok", "{outcome}");
     }
-    assert_eq!(rows[7].5, START - 1, "the time of the exchange");
+    assert_eq!(rows[8].5, START - 1, "the time of the exchange");
 
     // No placard or session token is stored anywhere.
     for secret in [&placard, &fresh, &judge, &before, &after] {
@@ -250,15 +254,8 @@ async fn judge_rooms_migration() {
     assert_eq!(code(&db, &audit("bad_signature", a_session)).await.as_deref(), check);
     assert_eq!(code(&db, &audit("ok", a_session)).await, None);
 
-    // Deleting a room ends its sessions; the audit row stays, without the session.
-    sqlx::query("DELETE FROM presentation_rooms WHERE room_id = 'R1'").execute(&db).await.unwrap();
-    let left: (i64, i64) = sqlx::query_as(
-        "SELECT (SELECT count(*) FROM sessions WHERE room_id IS NOT NULL), (SELECT count(*) FROM judge_exchange_audit WHERE session_id IS NULL)",
-    )
-    .fetch_one(&db)
-    .await
-    .unwrap();
-    assert_eq!(left, (0, 1));
+    // A room with sessions can't be deleted: that would skip the revocation cache.
+    assert_eq!(code(&db, "DELETE FROM presentation_rooms WHERE room_id = 'R1'").await.as_deref(), Some("23503"));
 }
 
 /// `/judge/exchange` server time under load: 2,000 exchanges from 16 callers

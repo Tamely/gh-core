@@ -16,7 +16,9 @@ CREATE TABLE presentation_rooms (
 -- A session belongs to a user or, for judges, to a room. Never both, never neither.
 ALTER TABLE sessions
     ALTER COLUMN user_id DROP NOT NULL,
-    ADD COLUMN room_id VARCHAR(32) REFERENCES presentation_rooms(room_id) ON DELETE CASCADE,
+    -- RESTRICT, not CASCADE: deleting rows would skip the Redis revocation cache,
+    -- so their tokens would keep working. Rotate (which revokes) before deleting.
+    ADD COLUMN room_id VARCHAR(32) REFERENCES presentation_rooms(room_id) ON DELETE RESTRICT,
     ADD CONSTRAINT sessions_user_or_room CHECK ((user_id IS NULL) <> (room_id IS NULL));
 -- Rotating a placard revokes the room's sessions.
 CREATE INDEX sessions_room_id ON sessions (room_id) WHERE room_id IS NOT NULL;
