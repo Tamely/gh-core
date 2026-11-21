@@ -6,7 +6,8 @@
 
 use sqlx::{Connection, PgConnection};
 
-/// Postgres error code of a failed statement: 23514 = CHECK failed, 23505 = duplicate.
+/// Postgres error code of a failed statement: 23514 = CHECK failed, 23505 = duplicate,
+/// 23503 = a foreign key still points at the row.
 async fn code(db: &mut PgConnection, sql: &str, arg: &str) -> Option<String> {
     let err = sqlx::query(sql).bind(arg).execute(db).await.err()?;
     err.as_database_error().and_then(|e| e.code()).map(|c| c.into_owned())
@@ -63,12 +64,13 @@ async fn users_and_auth_migration() {
     assert_eq!(code(&mut db, &session("14 days"), &user).await, None);
     assert_eq!(code(&mut db, &session("-1 day"), &user).await.as_deref(), Some("23514"));
 
-    // Deleting a user removes their roles and sessions.
-    sqlx::query("DELETE FROM users WHERE id = $1::uuid").bind(&user).execute(&mut db).await.unwrap();
-    let left: i64 = sqlx::query_scalar("SELECT (SELECT count(*) FROM user_roles) + (SELECT count(*) FROM sessions)")
-        .fetch_one(&mut db)
-        .await
-        .unwrap();
+    // A user with sessions can't be deleted (23503): the sessions would vanish
+    // without reaching the revocation cache. Once they're gone, the roles go with the user.
+    let delete = "DELETE FROM users WHERE id = $1::uuid";
+    assert_eq!(code(&mut db, delete, &user).await.as_deref(), Some("23503"));
+    sqlx::query("DELETE FROM sessions").execute(&mut db).await.unwrap();
+    assert_eq!(code(&mut db, delete, &user).await, None);
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM user_roles").fetch_one(&mut db).await.unwrap();
     assert_eq!(left, 0);
 
     sqlx::raw_sql("DROP SCHEMA auth_migration_test CASCADE").execute(&mut db).await.unwrap();

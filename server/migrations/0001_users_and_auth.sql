@@ -20,9 +20,13 @@ CREATE TABLE user_roles (
 );
 
 -- One row per signed-in device. `id` is the JWT's `sid` claim.
+-- A user with sessions can't be deleted (RESTRICT, not CASCADE): a session row
+-- that vanishes is never put in the Redis revocation cache, so its token would
+-- keep working until it expires. Revoke the user's sessions and wait for them to
+-- expire before deleting the rows and the user.
 CREATE TABLE sessions (
     id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id    UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ,
