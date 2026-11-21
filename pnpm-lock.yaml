@@ -35,6 +35,9 @@ importers:
 
   apps/client:
     dependencies:
+      '@aparajita/capacitor-secure-storage':
+        specifier: 8.0.1
+        version: 8.0.1
       '@capacitor-community/sqlite':
         specifier: 8.1.1
         version: 8.1.1(@capacitor/core@8.6.2)
@@ -125,6 +128,10 @@ importers:
   packages/brand: {}
 
 packages:
+
+  '@aparajita/capacitor-secure-storage@8.0.1':
+    resolution: {integrity: sha512-NSYIQtH6TyBgL3myumQGcCE3iecq2PtGNFlGxl1fJKEU37Dv5DudzDlwg42cgbVxCm1ay72g4X7rTSAvKULsVg==}
+    engines: {node: '>=20.0.0'}
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -228,6 +235,11 @@ packages:
     peerDependencies:
       '@capacitor/core': ^8.6.0
 
+  '@capacitor/app@8.1.2':
+    resolution: {integrity: sha512-uKBlsrXH0IdvUn69e/KKYbZ32A06pcrUdG8LWuZ/6y33YMXZXLEEdNSwl+jKS/SrsTWqnePs8EqSWaiQM3mUGA==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
+
   '@capacitor/assets@4.0.0':
     resolution: {integrity: sha512-6fi6bYunaawAZ9kkbJheB1Kon7AbqS3AYblQ2ocAnHGyO7YQX3gsgcH7hptklrpbcLT8B6KMyuBZqfDgChCyrw==}
     engines: {node: '>=20.9.0'}
@@ -250,6 +262,11 @@ packages:
     resolution: {integrity: sha512-YnVm0lRA1mQWK0SKd2bdJIOG+PXRRDDdndZ1+nGqeiob+QmHZmb4wWo5gVpWhoHO37pGi2qzH5w5WGvfKrs+Gg==}
     peerDependencies:
       '@capacitor/core': ^8.6.0
+
+  '@capacitor/keyboard@8.0.6':
+    resolution: {integrity: sha512-Bbe+9V0qaT6dzEFJEK7BUWR01l2+vZE8FM5ITF/WgKtx+G6eGZ6d5+YiSMRJBAK0VGjdO59v8yiQ10Doa5KyvQ==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@emnapi/core@2.0.0-beta.2':
     resolution: {integrity: sha512-MzCVoWtcg4Pm2B3je5mMvYMvj3MmBKw+fU7vbsJc9/iT8ip6/eYIHo/Dsm/mr+wsHB6SEyJDuxB09Yy6r/8+4A==}
@@ -2298,6 +2315,14 @@ packages:
 
 snapshots:
 
+  '@aparajita/capacitor-secure-storage@8.0.1':
+    dependencies:
+      '@capacitor/android': 8.6.2(@capacitor/core@8.6.2)
+      '@capacitor/app': 8.1.2(@capacitor/core@8.6.2)
+      '@capacitor/core': 8.6.2
+      '@capacitor/ios': 8.6.2(@capacitor/core@8.6.2)
+      '@capacitor/keyboard': 8.0.6(@capacitor/core@8.6.2)
+
   '@babel/code-frame@7.29.7':
     dependencies:
       '@babel/helper-validator-identifier': 7.29.7
@@ -2432,6 +2457,10 @@ snapshots:
     dependencies:
       '@capacitor/core': 8.6.2
 
+  '@capacitor/app@8.1.2(@capacitor/core@8.6.2)':
+    dependencies:
+      '@capacitor/core': 8.6.2
+
   '@capacitor/assets@4.0.0(@types/node@24.19.2)':
     dependencies:
       '@ionic/cli-framework-output': 2.2.8
@@ -2483,6 +2512,10 @@ snapshots:
       '@capacitor/core': 8.6.2
 
   '@capacitor/ios@8.6.2(@capacitor/core@8.6.2)':
+    dependencies:
+      '@capacitor/core': 8.6.2
+
+  '@capacitor/keyboard@8.0.6(@capacitor/core@8.6.2)':
     dependencies:
       '@capacitor/core': 8.6.2
 
