@@ -223,5 +223,5 @@ async fn starts_migrates_and_keeps_metrics_off_the_public_port() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(applied, 1);
+    assert_eq!(applied, 2);
 }

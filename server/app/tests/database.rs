@@ -36,6 +36,7 @@ async fn migrations_apply_to_empty_database_and_rerun_cleanly() {
             "judging_queue",
             "mentor_tickets",
             "notification_dispatches",
+            "notify_signups",
             "presentation_rooms",
             "teams",
             "users",
@@ -46,7 +47,7 @@ async fn migrations_apply_to_empty_database_and_rerun_cleanly() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(applied, 1);
+    assert_eq!(applied, 2);
 
     let vector: i64 =
         sqlx::query_scalar("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")

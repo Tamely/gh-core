@@ -6,6 +6,7 @@ pub mod db;
 pub mod events;
 pub mod hub;
 pub mod metrics;
+pub mod notify;
 pub mod topic;
 pub mod ws;
 
@@ -58,6 +59,7 @@ pub fn routes() -> Router<AppState> {
         .route("/healthz", get(|| async { StatusCode::OK }))
         .route("/readyz", get(readyz))
         .route("/api/v1/ws", get(ws::upgrade))
+        .route("/api/v1/notify", notify::route())
 }
 
 /// Wraps a router in the middleware every request goes through.

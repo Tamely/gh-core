@@ -71,6 +71,21 @@ docker run --rm -p 8080:8080 -e DATABASE_URL=... -e REDIS_URL=... gh-server
   `SHUTDOWN_DELAY_MS`, in-flight requests finish, and the process exits
   within 15s. Give the container a stop timeout above 15s.
 
+## Notify sign-ups
+
+`POST /api/v1/notify` with `{"email": "..."}` stores an address for the
+"registration is open" email (table `notify_signups`). Answers:
+
+- `204` stored, or already on the list (the two look the same, so the form
+  can't reveal who signed up)
+- `400` not shaped like an address, or not JSON; `422` no `email` field;
+  `413` body over 1KB; `415` not `application/json`
+- `429` the client added 10 new addresses in the last hour
+
+Browsers may call it only from `https://geauxhack.com` (CORS). The limit is
+per `X-Real-IP`, which the reverse proxy must set (overwriting any value the
+client sent). Requests without it share one bucket.
+
 ## Live updates
 
 `GET /api/v1/ws`. Clients send `{"op":"subscribe","topic":"room:PFT-1200"}`
