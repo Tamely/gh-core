@@ -167,6 +167,10 @@ pub async fn fake_provider() -> Fake {
                 (StatusCode::BAD_REQUEST, r#"{"code":60205}"#)
             } else if body.contains("Code=999999") {
                 (StatusCode::OK, "<html>bad gateway</html>")
+            } else if body.contains("Code=999998") {
+                (StatusCode::NOT_FOUND, r#"{"code":20404}"#)
+            } else if body.contains("Code=999997") {
+                (StatusCode::TOO_MANY_REQUESTS, r#"{"code":60202}"#)
             } else if path.ends_with("/Verifications") {
                 (StatusCode::CREATED, r#"{"status":"pending"}"#)
             } else if path.ends_with("/VerificationCheck") && body.contains("Code=123456") {

@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use fred::prelude::{Client, KeysInterface, LuaInterface};
+use fred::prelude::{Client, LuaInterface};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -119,7 +119,8 @@ impl Codes {
         assert!(!matches!(email, Sender::TwilioVerify { .. }), "Twilio Verify sends SMS, not email");
         assert!(!matches!(sms, Sender::Postmark { .. }), "Postmark sends email, not SMS");
         // Under Kenny's 3s request timeout, so a slow provider is a 503, not a cut-off request.
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().expect("TLS backend loads");
+        let http = reqwest::Client::builder().timeout(Duration::from_secs(2))
+            .redirect(reqwest::redirect::Policy::none()).build().expect("TLS backend loads");
         Self { email, sms, http }
     }
 
@@ -243,9 +244,9 @@ impl Codes {
         if !right || now >= exp.parse::<i64>().unwrap_or(0) {
             return Ok(false);
         }
-        // Single use: of two requests with the right code, only the one whose DEL
-        // removed the key gets in.
-        Ok(redis.del::<i64, _>(key).await.map_err(down)? == 1)
+        // Single use, tied to the challenge read above: a resend must not let
+        // an old in-flight check consume the replacement or sign in twice.
+        consume(redis, &key, stored_hash, exp).await
     }
 
     async fn twilio(&self, path: &str, form: &[(&str, &str)]) -> Result<(u16, Value), CodeError> {
@@ -268,6 +269,10 @@ impl Codes {
             status => Ok((status, Value::Null)),
         }
     }
+}
+
+async fn consume(redis: &Client, key: &str, stored_hash: &str, exp: &str) -> Result<bool, CodeError> {
+    Ok(redis.eval::<i64, _, _, _>(CONSUME, key, vec![stored_hash, exp]).await.map_err(down)? == 1)
 }
 
 /// The account for this email or phone, created on first sign-in (with no roles).
@@ -342,3 +347,38 @@ const TAKE: &str = "
 if redis.call('EXISTS', KEYS[1]) == 0 then return false end
 if redis.call('HINCRBY', KEYS[1], 'tries', 1) > tonumber(ARGV[1]) then return false end
 return redis.call('HMGET', KEYS[1], 'h', 'exp')";
+
+const CONSUME: &str = "
+if redis.call('HGET', KEYS[1], 'h') == ARGV[1] and redis.call('HGET', KEYS[1], 'exp') == ARGV[2] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fred::prelude::{Builder, ClientLike, Config};
+
+    #[tokio::test]
+    async fn an_in_flight_check_cannot_consume_a_resent_code() {
+        let redis = Builder::from_config(Config::from_url(&std::env::var("REDIS_URL").unwrap()).unwrap())
+            .build().unwrap();
+        redis.init().await.unwrap();
+        let codes = Codes::new(Sender::Log, Sender::Log);
+        for already_used in [false, true] {
+            let to = Dest::email(&format!("race-{}{}@example.com", new_code(), new_code())).unwrap();
+            let key = code_key(&to);
+            let old_hash = hash(&to, "111111");
+            redis.eval::<(), _, _, _>(STORE, &key, vec![old_hash, "1800000600".into(), CODE_SECS.to_string()]).await.unwrap();
+            // Pause a correct check after it has read the old challenge.
+            let stored: Vec<String> = redis.eval(TAKE, &key, MAX_TRIES).await.unwrap();
+            if already_used {
+                assert!(consume(&redis, &key, &stored[0], &stored[1]).await.unwrap());
+            }
+            // A resend arrives before that in-flight check finishes.
+            redis.eval::<(), _, _, _>(STORE, &key, vec![hash(&to, "222222"), "1800000660".into(), CODE_SECS.to_string()]).await.unwrap();
+            assert!(!consume(&redis, &key, &stored[0], &stored[1]).await.unwrap(), "old challenge consumed a newer code");
+            assert!(codes.check(&redis, &to, "222222", &to.key(), 1_800_000_061).await.unwrap());
+        }
+    }
+}

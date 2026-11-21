@@ -10,7 +10,7 @@ use std::sync::{
 
 use auth::{CodeError, Dest, CODE_SECS, MAX_TRIES};
 use common::*;
-use fred::prelude::HashesInterface;
+use fred::prelude::{HashesInterface, KeysInterface};
 use serde_json::Value;
 
 fn email() -> Dest {
@@ -135,6 +135,9 @@ async fn redis_keeps_a_hash_not_the_code() {
         redis.hgetall(format!("gh:code:email:{addr}")).await.unwrap();
     assert_eq!(stored["h"].len(), 64, "a hex SHA-256: {stored:?}");
     assert!(stored.values().all(|v| !v.contains(&code)), "{stored:?} contains {code}");
+    assert_eq!(stored["exp"], (NOW + CODE_SECS).to_string());
+    let ttl: i64 = redis.ttl(format!("gh:code:email:{addr}")).await.unwrap();
+    assert!((1..=CODE_SECS).contains(&ttl), "code hash must expire from Redis in ten minutes");
 }
 
 #[tokio::test]
@@ -256,6 +259,37 @@ async fn provider_down_is_503() {
     assert_eq!(codes.check(&redis, &phone, "123456", &ip, NOW).await, Err(CodeError::Unavailable));
 }
 
+#[tokio::test]
+async fn provider_redirects_do_not_forward_credentials_or_codes() {
+    use axum::{http::{header, StatusCode}, Router};
+    let destination = fake_provider().await;
+    let target = format!("{}/email", destination.url);
+    let app = Router::new().fallback(move || {
+        let target = target.clone();
+        async move { (StatusCode::TEMPORARY_REDIRECT, [(header::LOCATION, target)]) }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let codes = fake_codes(&Fake { url, seen: destination.seen.clone() });
+    let redis = redis().await;
+    for to in [email(), Dest::phone(&phone()).unwrap()] {
+        assert_eq!(codes.send(&redis, &to, &ip(), NOW).await, Err(CodeError::Unavailable));
+    }
+    assert!(destination.seen.lock().unwrap().is_empty(), "redirect received provider credentials");
+}
+
+#[tokio::test]
+async fn redis_down_cannot_send_or_verify_codes() {
+    let fake = fake_provider().await;
+    let codes = fake_codes(&fake);
+    let redis = dead_redis().await;
+    let to = email();
+    assert_eq!(codes.send(&redis, &to, &ip(), NOW).await, Err(CodeError::Unavailable));
+    assert_eq!(codes.check(&redis, &to, "123456", &ip(), NOW).await, Err(CodeError::Unavailable));
+    assert!(fake.seen.lock().unwrap().is_empty(), "a code must not be sent without abuse limits");
+}
+
 #[test]
 fn address_rules() {
     let email = |s| Dest::email(s).map(|d| format!("{d:?}"));
@@ -349,6 +383,15 @@ async fn sign_in_routes() {
             .await
             .unwrap();
     assert_eq!((stored_email, stored_phone), (None, number.clone()));
+
+    // Twilio deletes expired/used/exhausted verifications (404), or returns
+    // 429 when its five-check limit is reached. Neither may issue a session.
+    for (code, status) in [("999998", 401), ("999997", 429), ("999999", 503)] {
+        let res = call_body(&app, "POST", "/api/v1/auth/code/verify", &json, &phone_body(code)).await;
+        assert_eq!(res.status, status);
+        assert!(!res.headers.contains_key("set-cookie"));
+        assert!(!res.body.contains("token"));
+    }
 
     // Limits and bad requests.
     assert_eq!(call_body(&app, "POST", "/api/v1/auth/code", &json, &ask_phone).await.status, 429, "same minute");
