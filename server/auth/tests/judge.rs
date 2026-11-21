@@ -267,17 +267,16 @@ async fn exchange_p99() {
     let db = db("auth_judge_bench").await;
     set_room(&db, &judge_key(), ROOM, NOW - HOUR, NOW + HOUR).await.unwrap();
     let app = app(state(db, redis().await, || NOW), Router::new());
-    let body = json!({ "token": judge_key().placard(ROOM, 1) }).to_string();
+    let placard = judge_key().placard(ROOM, 1);
     let mut callers = tokio::task::JoinSet::new();
     let callers_n: usize = std::env::var("JUDGE_BENCH_CALLERS").ok().and_then(|n| n.parse().ok()).unwrap_or(16);
     for _ in 0..callers_n {
-        let (app, body) = (app.clone(), body.clone());
+        let (app, placard) = (app.clone(), placard.clone());
         callers.spawn(async move {
-            let headers = [("content-type", "application/json"), ("x-forwarded-for", IP)];
             let mut times = vec![];
             for _ in 0..2000 / callers_n {
                 let t = std::time::Instant::now();
-                let res = call_body(&app, "POST", "/api/v1/judge/exchange", &headers, &body).await;
+                let res = exchange(&app, &placard, &[]).await;
                 times.push(t.elapsed());
                 assert_eq!(res.status, 200, "{}", res.body);
             }

@@ -59,7 +59,7 @@ impl JudgeKey {
     /// Room and version, if we made this token. Rejections carry the room the
     /// token claimed (when it decoded) for the audit log.
     fn open(&self, token: &str) -> Result<(String, u32), (Option<String>, Outcome)> {
-        let malformed = (None, Outcome::Malformed);
+        let malformed = (None, "malformed");
         let raw = B64.decode(token).map_err(|_| malformed.clone())?;
         if raw.len() <= 4 + MAC_LEN || raw.len() > 32 + 4 + MAC_LEN {
             return Err(malformed);
@@ -73,33 +73,14 @@ impl JudgeKey {
         let room = String::from_utf8(room.to_vec()).expect("checked ASCII");
         let version = u32::from_be_bytes(version.try_into().expect("4 bytes"));
         // verify_slice compares in constant time.
-        self.mac(msg).verify_slice(mac).map_err(|_| (Some(room.clone()), Outcome::BadSignature))?;
+        self.mac(msg).verify_slice(mac).map_err(|_| (Some(room.clone()), "bad_signature"))?;
         Ok((room, version))
     }
 }
 
-/// Why an exchange was rejected, as stored in `judge_exchange_audit.outcome`.
-/// The caller only ever sees 200 or one identical 401.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Outcome {
-    Malformed,
-    BadSignature,
-    UnknownRoom,
-    OldVersion,
-    OutsideWindow,
-}
-
-impl Outcome {
-    fn as_str(self) -> &'static str {
-        match self {
-            Outcome::Malformed => "malformed",
-            Outcome::BadSignature => "bad_signature",
-            Outcome::UnknownRoom => "unknown_room",
-            Outcome::OldVersion => "old_version",
-            Outcome::OutsideWindow => "outside_window",
-        }
-    }
-}
+/// Why an exchange was rejected, as stored in `judge_exchange_audit.outcome`
+/// (the table's CHECK lists the allowed values). The caller only ever sees one identical 401.
+type Outcome = &'static str;
 
 #[derive(Deserialize)]
 pub(crate) struct ExchangeRequest {
@@ -149,10 +130,10 @@ pub(crate) async fn exchange(
         Err(_) => return down(),
     };
     let rejected = match room {
-        None => Err(Outcome::UnknownRoom),
-        Some((current, ..)) if u32::try_from(current) != Ok(version) => Err(Outcome::OldVersion),
+        None => Err("unknown_room"),
+        Some((current, ..)) if u32::try_from(current) != Ok(version) => Err("old_version"),
         Some((_, Some(starts), Some(ends))) if starts <= now && now < ends => Ok(ends),
-        Some(_) => Err(Outcome::OutsideWindow),
+        Some(_) => Err("outside_window"),
     };
     let ends = match rejected {
         Ok(ends) => ends,
@@ -218,7 +199,7 @@ impl Audit {
         .bind(self.now)
         .bind(&self.user_agent)
         .bind(&self.ip)
-        .bind(outcome.as_str())
+        .bind(outcome)
         .execute(db)
         .await;
         (StatusCode::UNAUTHORIZED, [NO_STORE, NO_REFERRER]).into_response()
@@ -295,22 +276,22 @@ mod tests {
 
         // Someone else's key.
         let forged = JudgeKey::new([1; 32]).placard("PFT-1200", 7);
-        assert_eq!(key.open(&forged), Err((Some("PFT-1200".into()), Outcome::BadSignature)));
+        assert_eq!(key.open(&forged), Err((Some("PFT-1200".into()), "bad_signature")));
 
         // Any changed byte: room, version or HMAC.
         let raw = B64.decode(&token).unwrap();
         for i in [0, raw.len() - MAC_LEN - 1, raw.len() - 1] {
             let mut bad = raw.clone();
             bad[i] ^= 1;
-            assert_eq!(key.open(&B64.encode(&bad)).unwrap_err().1, Outcome::BadSignature, "byte {i}");
+            assert_eq!(key.open(&B64.encode(&bad)).unwrap_err().1, "bad_signature", "byte {i}");
         }
 
         for junk in ["", "not a token!", &B64.encode([0u8; 36]), &format!("{token}=")] {
-            assert_eq!(key.open(junk), Err((None, Outcome::Malformed)), "{junk:?}");
+            assert_eq!(key.open(junk), Err((None, "malformed")), "{junk:?}");
         }
         // Room ids the table wouldn't allow never reach the audit log.
-        assert_eq!(key.open(&key.placard("../etc", 1)), Err((None, Outcome::Malformed)));
-        assert_eq!(key.open(&key.placard(&"A".repeat(33), 1)), Err((None, Outcome::Malformed)));
+        assert_eq!(key.open(&key.placard("../etc", 1)), Err((None, "malformed")));
+        assert_eq!(key.open(&key.placard(&"A".repeat(33), 1)), Err((None, "malformed")));
     }
 
     #[test]
