@@ -91,6 +91,26 @@ async fn sessions_and_revocation() {
     let day15 = at(|| NOW + 15 * DAY);
     assert_eq!(me(&day15, &t).await, 401, "the old token expired on day 14");
     assert_eq!(me(&day15, &renewed).await, 200, "the renewed one is good until day 22");
+    // Renewal moved the session's end in the database too: revoking on day 15
+    // (after the original end) still finds it.
+    s.revoke(&claims.sid, NOW + 15 * DAY).await.unwrap();
+    assert_eq!(me(&day15, &renewed).await, 401, "renewed session can still be revoked");
+
+    // Roles are re-read on renewal, so a removed role doesn't live on.
+    let boss = user(&db, "boss@example.com", &[Role::Admin, Role::Mentor]).await;
+    let b = token(s, k, &boss, NOW).await;
+    sqlx::query("DELETE FROM user_roles WHERE user_id = $1::uuid AND role = 'ADMIN'").bind(&boss).execute(&db).await.unwrap();
+    let res = call(&at(|| NOW + 8 * DAY), "GET", "/api/v1/me", &[("authorization", &bearer(&b))]).await;
+    let roles = k.verify(res.headers["x-session-token"].to_str().unwrap(), NOW + 8 * DAY).unwrap().roles;
+    assert_eq!(roles, vec![Role::Mentor], "ADMIN dropped at renewal");
+
+    // Judge sessions never renew: they end with judging.
+    let mut judge = s.start(&ricky, NOW).await.unwrap();
+    judge.roles = vec![Role::JudgeRoom];
+    judge.room_id = Some("room-a".into());
+    let res = call(&at(|| NOW + 8 * DAY), "GET", "/api/v1/me", &[("authorization", &bearer(&k.issue(&judge)))]).await;
+    assert_eq!(res.status, 200);
+    assert!(!res.headers.contains_key("x-session-token"), "judge session renewed");
 
     // Web gets the renewed token as a cookie instead.
     let c = token(s, k, &ricky, NOW).await;
@@ -99,7 +119,9 @@ async fn sessions_and_revocation() {
     let set = res.headers["set-cookie"].to_str().unwrap();
     assert!(set.starts_with("__Host-session=ey") && set.contains("HttpOnly") && set.contains("Max-Age=1209600"), "{set}");
 
-    // A revoked session isn't renewed.
-    s.revoke(&k.verify(&c, NOW).unwrap().sid, NOW).await.unwrap();
+    // A revoked session is refused, and renew() itself won't extend it either.
+    let revoked = k.verify(&c, NOW).unwrap();
+    s.revoke(&revoked.sid, NOW).await.unwrap();
     assert_eq!(call(&at(|| NOW + 8 * DAY), "GET", "/api/v1/me", &[("cookie", &cookie)]).await.status, 401);
+    assert_eq!(s.renew(&revoked, NOW + 8 * DAY).await.unwrap(), None);
 }

@@ -81,7 +81,7 @@ pub async fn user(db: &PgPool, email: &str, roles: &[Role]) -> String {
 }
 
 pub fn state(db: PgPool, redis: Client, now: fn() -> i64) -> Arc<AuthState> {
-    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions { db, redis }, policies: policies() })
+    Arc::new(AuthState { keys: keys(), origin: ORIGIN.into(), now, sessions: Sessions::new(db, redis), policies: policies() })
 }
 
 /// Auth's routes plus `extra`, under the auth layer, like the real server.

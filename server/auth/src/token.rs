@@ -283,4 +283,12 @@ mod tests {
         assert!(Keys::load("not a pem", "").is_err());
         assert!(Keys::load(&pem, "c2hvcnQ").is_err());
     }
+
+    #[test]
+    fn kid_matches_the_rfc_example() {
+        // RFC 8037 appendix A.3: the thumbprint of the RFC's example Ed25519 key.
+        let x: [u8; 32] = B64.decode("11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo").unwrap().try_into().unwrap();
+        let key = VerifyingKey::from_bytes(&x).unwrap();
+        assert_eq!(kid(&key), "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k");
+    }
 }

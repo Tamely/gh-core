@@ -88,6 +88,11 @@ pub(crate) fn cross_site(state: &AuthState, caller: &Caller, headers: &HeaderMap
 /// Axum middleware for the whole app (`Router::layer`, so it sees the matched route):
 /// `.layer(axum::middleware::from_fn_with_state(state, auth::layer))`.
 /// Handlers read the caller with `Extension<Caller>`.
+///
+/// Call it **last**, after every `.route`/`.merge`/`.nest`: `Router::layer` only
+/// wraps routes that already exist, so a route added afterwards skips auth.
+/// Use `nest(Router)`, not `nest_service`: nested services have no matched
+/// route, so everything under them is 403.
 pub async fn layer(State(state): State<Arc<AuthState>>, mut req: Request, next: Next) -> Response {
     let now = (state.now)();
     let caller = identify(req.headers(), &state.keys, now);
@@ -137,7 +142,9 @@ pub async fn layer(State(state): State<Arc<AuthState>>, mut req: Request, next: 
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {
-    headers.get(header::AUTHORIZATION)?.to_str().ok()?.strip_prefix("Bearer ")
+    // The scheme name is case-insensitive (RFC 7235): "bearer x" works too.
+    let (scheme, token) = headers.get(header::AUTHORIZATION)?.to_str().ok()?.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then_some(token)
 }
 
 fn cookie(headers: &HeaderMap) -> Option<&str> {

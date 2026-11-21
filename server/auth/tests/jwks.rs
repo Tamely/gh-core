@@ -14,7 +14,7 @@ async fn jwks_lets_another_library_verify_our_tokens() {
     let old = SigningKey::from_bytes(&[2; 32]).verifying_key();
     let keys = Keys::new(SigningKey::from_bytes(&[1; 32]), vec![old]);
     // Public route: works with both databases down.
-    let sessions = Sessions { db: dead_db(), redis: dead_redis().await };
+    let sessions = Sessions::new(dead_db(), dead_redis().await);
     let state = Arc::new(AuthState { keys, origin: ORIGIN.into(), now: || NOW, sessions, policies: policies() });
 
     let res = call(&app(state.clone(), Router::new()), "GET", "/.well-known/jwks.json", &[]).await;
@@ -25,7 +25,19 @@ async fn jwks_lets_another_library_verify_our_tokens() {
 
     // Current key and old key, public parts only.
     let set: serde_json::Value = serde_json::from_slice(body).unwrap();
-    assert_eq!(set["keys"].as_array().unwrap().len(), 2);
+    // Exactly the current and old key, each with the right kid and x, and nothing secret.
+    let b64 = |k: &ed25519_dalek::VerifyingKey| base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, k.as_bytes());
+    let current = SigningKey::from_bytes(&[1; 32]).verifying_key();
+    let mut want: Vec<(String, String)> = [current, old].iter().map(|k| (auth::kid(k), b64(k))).collect();
+    let mut got: Vec<(String, String)> = set["keys"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| (k["kid"].as_str().unwrap().into(), k["x"].as_str().unwrap().into()))
+        .collect();
+    want.sort();
+    got.sort();
+    assert_eq!(got, want);
     assert!(set["keys"].as_array().unwrap().iter().all(|k| k.get("d").is_none()));
 
     // Verify with jsonwebtoken, using nothing but the JWKS response.

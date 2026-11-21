@@ -81,4 +81,6 @@ async fn opening_the_socket() {
     let sid = state.keys.verify(&token, NOW).unwrap().sid;
     state.sessions.revoke(&sid, NOW).await.unwrap();
     assert_eq!(ws_first_message(&state, &token).await.unwrap(), Caller::Anonymous);
+    let upgrade = ws_caller(&state, &headers(&[("cookie", &cookie), ("origin", ORIGIN)])).await;
+    assert_eq!(upgrade.unwrap(), Caller::Anonymous, "revoked cookie on upgrade");
 }

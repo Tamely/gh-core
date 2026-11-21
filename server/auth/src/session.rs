@@ -6,10 +6,13 @@
 //!
 //! Redis keeps nothing on disk, so after it restarts the cache is empty. The
 //! `gh:revoked:ready` key says "the cache is loaded": while it's missing, lookups
-//! go to Postgres and the cache is reloaded.
+//! go to Postgres and one request reloads the cache.
+
+use std::time::Duration;
 
 use fred::prelude::{Client, KeysInterface};
 use sqlx::PgPool;
+use tokio::sync::Mutex;
 
 use crate::{Claims, Role, SESSION_SECS};
 
@@ -22,6 +25,10 @@ fn key(sid: &str) -> String {
     format!("gh:revoked:{sid}")
 }
 
+async fn cache(redis: &Client, sid: &str, ttl: i64) -> Result<(), fred::error::Error> {
+    redis.set(key(sid), 1, Some(fred::types::Expiration::EX(ttl.max(1))), None, false).await
+}
+
 /// Neither Redis nor Postgres answered, so we can't tell if a session was
 /// revoked. Callers return 503; never treat it as "not revoked".
 #[derive(Debug, PartialEq, Eq)]
@@ -31,16 +38,18 @@ pub struct Sessions {
     pub db: PgPool,
     /// Kenny's shared fred client (1s command timeout).
     pub redis: Client,
+    /// Only one reload at a time; other requests ask Postgres meanwhile.
+    reloading: Mutex<()>,
 }
 
 impl Sessions {
+    pub fn new(db: PgPool, redis: Client) -> Self {
+        Self { db, redis, reloading: Mutex::new(()) }
+    }
+
     /// Opens a session for a user and returns the claims to sign.
     pub async fn start(&self, user_id: &str, now: i64) -> Result<Claims, sqlx::Error> {
-        let roles: Vec<String> =
-            sqlx::query_scalar("SELECT role FROM user_roles WHERE user_id = $1::uuid ORDER BY role")
-                .bind(user_id)
-                .fetch_all(&self.db)
-                .await?;
+        let roles = self.roles(user_id).await?;
         let exp = now + SESSION_SECS;
         let sid: String = sqlx::query_scalar(
             "INSERT INTO sessions (user_id, created_at, expires_at)
@@ -51,15 +60,17 @@ impl Sessions {
         .bind(exp)
         .fetch_one(&self.db)
         .await?;
-        Ok(Claims {
-            sub: user_id.into(),
-            // The table's CHECK only allows real roles, so nothing is dropped here.
-            roles: roles.into_iter().filter_map(|r| serde_json::from_value::<Role>(r.into()).ok()).collect(),
-            sid,
-            iat: now,
-            exp,
-            room_id: None,
-        })
+        Ok(Claims { sub: user_id.into(), roles, sid, iat: now, exp, room_id: None })
+    }
+
+    async fn roles(&self, user_id: &str) -> Result<Vec<Role>, sqlx::Error> {
+        let roles: Vec<String> =
+            sqlx::query_scalar("SELECT role FROM user_roles WHERE user_id = $1::uuid ORDER BY role")
+                .bind(user_id)
+                .fetch_all(&self.db)
+                .await?;
+        // The table's CHECK only allows real roles, so nothing is dropped here.
+        Ok(roles.into_iter().filter_map(|r| serde_json::from_value(r.into()).ok()).collect())
     }
 
     /// Logout: revokes one session.
@@ -72,9 +83,9 @@ impl Sessions {
         self.revoke_where("user_id = $1::uuid", user_id, now).await
     }
 
-    /// Safe to retry: an already-revoked session keeps its time and is cached again.
-    /// `Unavailable` if Postgres failed, or the cache couldn't be updated or
-    /// marked stale (a revoked session could still pass): the caller says retry.
+    /// `Unavailable` only if Postgres failed (nothing was revoked; retry). Once the
+    /// database says revoked it's done: if Redis can't take it, "ready" is dropped
+    /// so lookups go to Postgres, and the cache write is retried in the background.
     async fn revoke_where(&self, condition: &str, id: &str, now: i64) -> Result<(), Unavailable> {
         let revoked: Vec<(String, i64)> = sqlx::query_as(&format!(
             "UPDATE sessions SET revoked_at = COALESCE(revoked_at, to_timestamp($2))
@@ -87,21 +98,43 @@ impl Sessions {
         .await
         .map_err(|_| Unavailable)?;
         for (sid, exp) in revoked {
-            if self.cache(&sid, exp - now).await.is_err() {
-                // The database says revoked but the cache doesn't. Drop "ready" so
-                // lookups go to Postgres until the next reload.
-                self.redis.del::<(), _>(READY).await.map_err(|_| Unavailable)?;
+            if cache(&self.redis, &sid, exp - now).await.is_err() {
+                let _: Result<(), _> = self.redis.del(READY).await;
+                self.retry_cache(sid, exp - now);
             }
         }
         Ok(())
     }
 
-    async fn cache(&self, sid: &str, ttl: i64) -> Result<(), fred::error::Error> {
-        self.redis.set(key(sid), 1, Some(fred::types::Expiration::EX(ttl.max(1))), None, false).await
+    /// Keeps trying once a second until Redis takes the key or the session would
+    /// have expired anyway. Covers a Redis blip where even dropping "ready" failed.
+    fn retry_cache(&self, sid: String, ttl: i64) {
+        let redis = self.redis.clone();
+        tokio::spawn(async move {
+            for left in (1..ttl).rev() {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if cache(&redis, &sid, left).await.is_ok() {
+                    return;
+                }
+            }
+        });
     }
 
     /// Fills the cache from Postgres. Runs on startup and whenever Redis lost it.
     pub async fn reload(&self, now: i64) -> Result<(), Unavailable> {
+        let _one = self.reloading.lock().await;
+        self.reload_locked(now).await
+    }
+
+    async fn reload_locked(&self, now: i64) -> Result<(), Unavailable> {
+        self.cache_revoked(now).await?;
+        self.redis.set::<(), _, _>(READY, 1, None, None, false).await.map_err(|_| Unavailable)?;
+        // Second pass: a revoke that committed during the first pass, failed to
+        // cache, and dropped "ready" before we set it again is picked up here.
+        self.cache_revoked(now).await
+    }
+
+    async fn cache_revoked(&self, now: i64) -> Result<(), Unavailable> {
         let revoked: Vec<(String, i64)> = sqlx::query_as(
             "SELECT id::text, extract(epoch FROM expires_at)::bigint FROM sessions
              WHERE revoked_at IS NOT NULL AND expires_at > to_timestamp($1)",
@@ -112,9 +145,9 @@ impl Sessions {
         .map_err(|_| Unavailable)?;
         // ponytail: one SET per revoked session; pipeline it if revocations reach the thousands.
         for (sid, exp) in revoked {
-            self.cache(&sid, exp - now).await.map_err(|_| Unavailable)?;
+            cache(&self.redis, &sid, exp - now).await.map_err(|_| Unavailable)?;
         }
-        self.redis.set::<(), _, _>(READY, 1, None, None, false).await.map_err(|_| Unavailable)
+        Ok(())
     }
 
     /// Redis first; Postgres if Redis errors or lost its data. A session we have
@@ -122,8 +155,11 @@ impl Sessions {
     pub async fn is_revoked(&self, sid: &str, now: i64) -> Result<bool, Unavailable> {
         match self.redis.mget::<Vec<Option<String>>, _>(vec![key(sid), READY.into()]).await {
             Ok(v) if v.get(1).is_some_and(Option::is_some) => return Ok(v[0].is_some()),
-            // ponytail: every request reloads until one finishes; fine for a few hundred revocations.
-            Ok(_) => _ = self.reload(now).await,
+            Ok(_) => {
+                if let Ok(_one) = self.reloading.try_lock() {
+                    let _ = self.reload_locked(now).await;
+                }
+            }
             Err(_) => {}
         }
         sqlx::query_scalar::<_, bool>("SELECT revoked_at IS NULL FROM sessions WHERE id = $1::uuid")
@@ -135,8 +171,9 @@ impl Sessions {
     }
 
     /// Sliding renewal: with under 7 days left, push the session out to 14 days
-    /// from now and return new claims to sign. `None` if it isn't due, was
-    /// revoked, or is a judge session (those end with judging).
+    /// from now and return new claims to sign, with roles re-read so role changes
+    /// reach long-lived sessions. `None` if it isn't due, was revoked, or is a
+    /// judge session (those end with judging).
     pub async fn renew(&self, claims: &Claims, now: i64) -> Result<Option<Claims>, sqlx::Error> {
         if claims.exp - now >= RENEW_SECS || claims.room_id.is_some() {
             return Ok(None);
@@ -148,6 +185,9 @@ impl Sessions {
             .execute(&self.db)
             .await?
             .rows_affected();
-        Ok((renewed == 1).then(|| Claims { iat: now, exp, ..claims.clone() }))
+        if renewed != 1 {
+            return Ok(None);
+        }
+        Ok(Some(Claims { roles: self.roles(&claims.sub).await?, iat: now, exp, ..claims.clone() }))
     }
 }

@@ -28,3 +28,5 @@ CREATE TABLE sessions (
     revoked_at TIMESTAMPTZ,
     CHECK (expires_at > created_at)
 );
+-- "Sign out everywhere" and deleting a user look sessions up by user.
+CREATE INDEX sessions_user_id ON sessions (user_id);

@@ -21,6 +21,10 @@ async fn identifies_the_caller() {
     let cases = [
         ("no token", "GET", me, vec![], 401),
         ("bearer", "GET", me, vec![("authorization", "Bearer {t}")], 200),
+        ("lowercase bearer", "GET", me, vec![("authorization", "bearer {t}")], 200),
+        ("HEAD uses the GET rule", "HEAD", me, vec![("authorization", "Bearer {t}")], 200),
+        // A bad bearer never falls back to a good cookie.
+        ("bad bearer beats good cookie", "GET", me, vec![("authorization", "Bearer nope"), ("cookie", "__Host-session={t}")], 401),
         ("cookie among others", "GET", me, vec![("cookie", "theme=dark; __Host-session={t}; other=1")], 200),
         ("garbage bearer", "GET", me, vec![("authorization", "Bearer nope")], 401),
         ("expired cookie", "GET", me, vec![("cookie", "__Host-session={expired}")], 401),

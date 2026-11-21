@@ -18,9 +18,8 @@ _Last updated: 2026-11-20_
 No Rust toolchain on Ricky's Mac yet: tests run in Docker (`rust:1-slim-bookworm`, Postgres from `pgvector/pgvector:pg16`):
 ```
 docker compose -f server/docker-compose.yml up -d --wait
-docker run --rm -v "$PWD/server:/work" -w /work -v gh-auth-cargo:/usr/local/cargo/registry -v gh-auth-target:/target -e CARGO_TARGET_DIR=/target -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/postgres rust:1-slim-bookworm cargo test -p auth
+docker run --rm -v "$PWD/server:/work" -w /work -v gh-auth-cargo:/usr/local/cargo/registry -v gh-auth-target:/target -e CARGO_TARGET_DIR=/target -e DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/postgres -e REDIS_URL=redis://host.docker.internal:6379 rust:1-slim-bookworm cargo test -p auth
 ```
-Add `-e REDIS_URL=redis://host.docker.internal:6379` to that `docker run` (sessions, matrix and WebSocket tests use Redis).
 
 Try it by hand with the dev-only `auth-dev` tool (fixed dev key, never deployed). From the repo root, define a helper (works in zsh and bash), start the server, then mint a token and curl in a second terminal (define the helper there too):
 ```
@@ -31,7 +30,7 @@ curl -H "Authorization: Bearer $T" 127.0.0.1:8080/api/v1/me
 ```
 
 ### PR 1 build order (agreed 2026-11-20)
-All steps done (2026-11-20). Planned as two stacked PRs (1a = steps 1–3, 1b = 4–9); one combined PR is also fine since nothing is pushed.
+All steps done (2026-11-20), shipped as **one PR** (liangricky7/gh-core#1 on the fork; to be opened on Tamely/gh-core). Auth PRs 2–5 are separate PRs, each merged before the next opens; Kenny's merges only after all five.
 
 | # | Step | Proves | Test |
 |---|---|---|---|
@@ -43,7 +42,7 @@ All steps done (2026-11-20). Planned as two stacked PRs (1a = steps 1–3, 1b = 
 | 6 | **Done** (`auth::Policy`, `auth::policies()`). Policies + default deny: one global layer looks up `"METHOD /matched/path"` in a policy map (`Public`, `SignedIn`, `RequireRole`, `RequireRoom`); no entry → 403, signed out → 401, wrong role → 403. Kenny's `/healthz`, `/readyz`, `/api/v1/ws` are `Public`. First route `GET /api/v1/me` | A forgotten route is locked | Per-policy unit tests; unlisted route → 403 |
 | 7 | **Done** (`auth::ws_caller`, `ws_first_message`, `may_subscribe`, tests/ws.rs). WebSocket auth replacing Kenny's `auth::AllowAll`: web = cookie + `Origin` check; native = token as first message (never in the URL, which gets logged). `user:{id}` self only, `room:{id}` that room's judges + admins, `team:*` / `mentor-tag:*` admin only until their tables exist | Live updates no longer open to anyone | Topic × caller tests |
 | 8 | **Done** (tests/matrix.rs). Route × role matrix test (anon, each role, no roles, judge room A/B, revoked, expired, unlisted and unknown routes); fails if a policy-map route has no row | Whole authorization picture in one table | `cargo test` |
-| 9 | **Done** as `auth-dev mint ROLE [email]` plus `auth-dev serve` (auth's routes on :8080), since there's no server to curl yet. Dev-only binary, fixed dev key, never part of the server | Test signed-in requests before sign-in exists | `curl -H "Authorization: Bearer $(mint-token --role ADMIN)" …/api/v1/me` |
+| 9 | **Done** as `auth-dev mint ROLE [email]` plus `auth-dev serve` (auth's routes on :8080), since there's no server to curl yet. Dev-only binary, fixed dev key, never part of the server | Test signed-in requests before sign-in exists | `curl -H "Authorization: Bearer $(auth-dev mint ADMIN)" 127.0.0.1:8080/api/v1/me` (full Docker commands under Status) |
 
 ### Later PRs
 2. Email/SMS one-time codes. 3. OAuth: Google, GitHub, Apple. 4. Judge room tokens, exchange endpoint, QR script, audit log. 5. Native/offline client pieces (with Josh's storage interface).
@@ -58,7 +57,7 @@ All steps done (2026-11-20). Planned as two stacked PRs (1a = steps 1–3, 1b = 
 
 ## Decisions
 - **Rust, not Go** (2026-11-20). The spec (§3) allows either for the single API binary; the team chose Rust and Kenny's Axum server already exists. Auth is a crate in his workspace, not a second server.
-- **Production domain `app.geauxhack.com`** (was `.org`), matching Josh's and Kenny's latest handoffs.
+- **Production domain `app.geauxhack.com`** (was `.org`), matching Kenny's latest handoff. `handoffs/josh.md` on `main` still says `.org`: to confirm with Josh (see Needs from others). If the site went live on `.org`, every cookie request that changes data would get 403.
 - **JWTs are signed and checked with `ed25519-dalek` directly**, not a JWT library. Verify accepts only `alg: EdDSA` whatever the header says, uses `verify_strict`, and rejects padded or non-canonical base64. `jsonwebtoken` is a test-only dependency that proves other software can verify our tokens from the JWKS.
 - **`kid` is the RFC 7638 thumbprint** of the public key, so there's no key-ID config to get wrong.
 - **Key config:** current private key as PKCS#8 PEM (`openssl genpkey -algorithm ed25519`); old keys as comma-separated base64url public keys (their JWKS `x`). Env var names are picked when it's wired into Kenny's config.
@@ -69,11 +68,16 @@ All steps done (2026-11-20). Planned as two stacked PRs (1a = steps 1–3, 1b = 
 - **In QA/prod, the API server, Postgres and Redis all run on the same DigitalOcean droplet** (2026-11-20). Postgres and Redis are never reachable from the internet; the API connects over `127.0.0.1` (Kenny's note: not `localhost`). Avoids sending every query across the internet, which a separate host (e.g. AWS) would.
 - **Revocation when Redis is down:** fall back to Postgres; if both are down, 503, never allow. Public routes (health checks, JWKS) skip the check, so they keep working.
 - **Redis losing its data is detected with a `gh:revoked:ready` marker** set after a reload. Redis runs without persistence, so a restart empties it; without the marker, revoked tokens would pass until our server restarted.
-- **Logout/revoke returns 503 if the Redis cache can't be updated or marked stale**, so a revoke never silently half-works. Retrying is safe.
+- **Logout/revoke only fails (503) if Postgres fails.** Once Postgres says revoked, it's done: if Redis can't take the key, `gh:revoked:ready` is dropped (lookups go to Postgres) and the key is retried in the background every second until it lands. A revoke no longer depends on the user retrying after a 503. Remaining gap: if Redis can take neither the key nor the drop, the session can pass for as long as the Redis blip lasts.
+- **Reload runs twice around setting `gh:revoked:ready`**, so a revoke that lands mid-reload isn't lost, and **only one request reloads at a time** (the rest ask Postgres meanwhile). Neither race has an automated test: it needs a Redis that fails on cue.
+- **Renewal re-reads roles** from `user_roles`, so a removed role is gone within 7 days at most. For an immediate change, also revoke the user's sessions.
+- **`auth-dev` only runs against a local database** (127.0.0.1, localhost, host.docker.internal) and applies migrations with sqlx's runner (`_sqlx_migrations`), the same bookkeeping the server will use.
 - **Public routes always see `Caller::Anonymous`**, so a public handler can't accidentally rely on who's calling.
 - **Added a `SignedIn` policy** (any role, or none) for `/me` and logout, so a brand-new account with no roles can still sign out.
 - **Judge sessions never renew**; they end with judging.
 - **Revocation doesn't close open WebSockets** (checked on connect only). Fine for now; re-check per event if it matters.
+- **Router wiring rules for Kenny:** call `.layer(auth::layer)` **last** (axum's `Router::layer` only wraps routes that already exist, so a route added after it skips auth), and use `nest(Router)`, not `nest_service` (nested services have no matched route, so they'd all be 403).
+- **Known small gaps, left on purpose:** unknown paths and wrong methods return 403 instead of 404/405 (safe, just less specific); CORS, if ever added, must sit outside the auth layer; the matrix test only checks `auth::policies()`, so Kenny's own routes need rows in a matrix of his; `gh:revoked:ready` is one shared Redis key, so two test runs at once on the same Redis can interfere.
 - **`auth-dev` uses a fixed dev signing key**, so its tokens only work on `auth-dev serve`, never on a real server.
 - **Secure-storage plugin (proposed, not final):** `@aparajita/capacitor-secure-storage`, as named in the ticket. To be confirmed as maintained before PR 1.4 needs it.
 - **SMS codes:** Twilio Verify generates and checks SMS codes itself, so the hash / expiry / attempt rules are built by us for **email** codes only.
@@ -81,7 +85,7 @@ All steps done (2026-11-20). Planned as two stacked PRs (1a = steps 1–3, 1b = 
 ## Provides to others
 Built in PR 1 (not pushed yet; shapes may still change before it merges):
 - `auth::Keys` (`load`, `issue`, `verify`), `auth::Claims`, `auth::Role`.
-- `auth::AuthState { keys, origin, now, sessions: Sessions { db, redis }, policies }`, `auth::layer` (put on the whole router with `Router::layer`), handlers read `Extension<auth::Caller>`.
+- `auth::AuthState { keys, origin, now, sessions: Sessions::new(db, redis), policies }`, `auth::layer` (put on the whole router with `Router::layer`, as the last call), handlers read `Extension<auth::Caller>`.
 - `auth::routes(state)`: `GET /.well-known/jwks.json`, `GET /api/v1/me` (`{id, roles, exp, roomId?}`), `POST /api/v1/auth/logout` (204, clears the cookie), `POST /api/v1/admin/users/{id}/revoke-sessions` (admin).
 - Policy map `auth::policies()` keyed `"METHOD /path"` with `Public` / `SignedIn` / `RequireRole(...)` / `RequireRoom` (uses the `{room_id}` path parameter). A route with no policy returns `403`. **Kenny:** new routes need an entry, or they 403.
 - Session cookie `__Host-session` (web), `Authorization: Bearer <jwt>` (native). **Josh:** when a response has an `x-session-token` header, native stores that token in place of the old one (sliding renewal); web gets a new cookie automatically.
@@ -92,10 +96,11 @@ Built in PR 1 (not pushed yet; shapes may still change before it merges):
 ## Needs from others
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
-| Kenny | **Rebase onto auth once it's on `main`** (see Status for how to wire `AuthState`, `auth::layer`, `auth::routes` and the policy map; share your fred client) (per Ricky's senior dev, auth and Postgres land first). Your §5 migration becomes 0002: `users` already exists from `0001_users_and_auth.sql` (`id`, `email`, `phone_e164`, `created_at`), so ALTER it to add your columns. Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
+| Kenny | **Rebase onto auth once it's on `main`** (see Status for how to wire `AuthState`, `auth::layer`, `auth::routes` and the policy map; share your fred client; `.layer(auth::layer)` goes last; use your migration runner on `server/migrations`, which already has sqlx bookkeeping from `auth-dev`) (per Ricky's senior dev, auth and Postgres land first). Your §5 migration becomes 0002: `users` already exists from `0001_users_and_auth.sql` (`id`, `email`, `phone_e164`, `created_at`), so ALTER it to add your columns. Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
 | Kenny | You take `POST /api/v1/notify` next; Ricky is on auth. | Answers "notify or auth next" in your handoff | — |
 | Kenny / database | Make `users.phone_e164`, `full_name`, `school`, `qr_hmac_sig` nullable (or filled later). A first Google/GitHub/Apple or email-code sign-in has none of them. | OAuth and codes PRs can't create users | before PR 2 |
 | Kenny / database | `presentation_rooms.panel_hmac_token` stores the judge token itself. The ticket says store only a token **version** and a token **hash**, plus a judging window (start/end). | Judge rooms PR | before PR 4 |
+| Josh | Confirm the production domain is `app.geauxhack.com`: `handoffs/josh.md` on `main` still says `app.geauxhack.org` (deep links, privacy URL, hosting). Auth's `Origin` check uses `.com`. | A `.org` site would get 403 on every cookie request that changes data | before PR 2 |
 | Josh | `handoffs/josh.md` says `/api/*` goes to "the Rust server": correct, the backend is Rust (Kenny's Axum server). No change needed. | — | — |
 | ops | Google OAuth client IDs (web, iOS, Android) | OAuth PR | before OAuth PR |
 | ops | GitHub OAuth app | OAuth PR | before OAuth PR |

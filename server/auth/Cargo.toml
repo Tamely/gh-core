@@ -13,9 +13,10 @@ fred = "10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
-# Only the dev-only auth-dev binary needs these.
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+# "migrate" and "macros" are for auth-dev, which runs migrations the same way the server will.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros"] }
+# "time" for the background revocation retry; the rest for auth-dev.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
 
 [dev-dependencies]
 # Independent JWT library, used only to prove other software can verify our tokens.

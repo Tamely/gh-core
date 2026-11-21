@@ -6,12 +6,13 @@
 //!
 //! Both use a fixed dev signing key, so tokens from `mint` only work on `serve`.
 //! Needs DATABASE_URL and REDIS_URL (the dev databases from docker-compose.yml).
-//! Loads the auth migration into an empty dev database. AUTH_DEV_ADDR changes
+//! Only runs against a local database, and applies the migrations in
+//! server/migrations first (sqlx's runner). AUTH_DEV_ADDR changes
 //! the listen address (0.0.0.0:8080 when it runs inside Docker).
 
 use std::{sync::Arc, time::Duration};
 
-use auth::{layer, policies, routes, AuthState, Keys, Sessions};
+use auth::{layer, policies, routes, AuthState, Keys, Role, Sessions};
 use ed25519_dalek::SigningKey;
 use fred::prelude::{Builder, ClientLike, Config};
 
@@ -21,26 +22,46 @@ fn now() -> i64 {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let usage = "usage: auth-dev mint ROLE [email] | auth-dev serve";
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    if !matches!(args[..], ["mint", _] | ["mint", _, _] | ["serve"]) {
+        return Err(usage.into());
+    }
+    if let ["mint", role, ..] = args[..] {
+        match serde_json::from_value::<Role>(role.to_uppercase().into()) {
+            Ok(Role::JudgeRoom) => return Err("JUDGE_ROOM sessions come from the judge exchange (PR 4)".into()),
+            Ok(_) => {}
+            Err(_) => return Err(format!("unknown role {role:?}; use HACKER, VOLUNTEER, MENTOR or ADMIN").into()),
+        }
+    }
+
     let env = |name: &str| std::env::var(name).map_err(|_| format!("set {name}"));
-    let db = sqlx::PgPool::connect(&env("DATABASE_URL")?).await?;
+    let url = env("DATABASE_URL")?;
+    // Refuse anything but a database on this machine, so a tunnelled droplet URL
+    // left in the shell can't get dev admins written into it.
+    let host = url.rsplit('@').next().unwrap_or("").split(['/', ':']).next().unwrap_or("");
+    if !["127.0.0.1", "localhost", "host.docker.internal", "[::1]"].contains(&host) {
+        return Err(format!("auth-dev only runs against a local database, not {host:?}").into());
+    }
+    let db = sqlx::PgPool::connect(&url).await?;
+    // Same migration runner and bookkeeping the server will use.
+    sqlx::migrate!("../migrations").run(&db).await?;
     let redis = Builder::from_config(Config::from_url(&env("REDIS_URL")?)?)
         .with_performance_config(|c| c.default_command_timeout = Duration::from_secs(1))
         .build()?;
     redis.init().await?;
-    if sqlx::query_scalar::<_, Option<String>>("SELECT to_regclass('users')::text").fetch_one(&db).await?.is_none() {
-        sqlx::raw_sql(include_str!("../../../migrations/0001_users_and_auth.sql")).execute(&db).await?;
-    }
     let state = Arc::new(AuthState {
         keys: Keys::new(SigningKey::from_bytes(&[7; 32]), vec![]),
         origin: "http://127.0.0.1:8080".into(),
         now,
-        sessions: Sessions { db, redis },
+        sessions: Sessions::new(db, redis),
         policies: policies(),
     });
 
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+    match args[..] {
         ["mint", role, ref rest @ ..] => {
+            let role = role.to_uppercase();
             let email = rest.first().copied().unwrap_or("dev@example.com").to_lowercase();
             let db = &state.sessions.db;
             let id: String = sqlx::query_scalar(
@@ -52,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
             sqlx::query("INSERT INTO user_roles (user_id, role) VALUES ($1::uuid, $2) ON CONFLICT DO NOTHING")
                 .bind(&id)
-                .bind(role.to_uppercase())
+                .bind(&role)
                 .execute(db)
                 .await?;
             let claims = state.sessions.start(&id, now()).await?;
@@ -66,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("auth-dev serving on http://{addr}");
             axum::serve(listener, app).await?;
         }
-        _ => return Err("usage: auth-dev mint ROLE [email] | auth-dev serve".into()),
+        _ => unreachable!("checked above"),
     }
     Ok(())
 }
