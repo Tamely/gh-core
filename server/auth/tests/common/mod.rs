@@ -14,7 +14,7 @@ use tower::ServiceExt;
 
 pub const NOW: i64 = 1_800_000_000;
 pub const DAY: i64 = 24 * 60 * 60;
-pub const ORIGIN: &str = "https://app.geauxhack.com";
+pub const ORIGIN: &str = "https://app.geauxhack.org";
 
 pub fn keys() -> Keys {
     Keys::new(SigningKey::from_bytes(&[1; 32]), vec![])
