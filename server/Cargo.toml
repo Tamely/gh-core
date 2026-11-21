@@ -1,0 +1,5 @@
+# Placeholder for Kenny's Cargo workspace (kenny/server-skeleton, not pushed yet).
+# When his stack lands, keep his file and add "auth" to its members.
+[workspace]
+resolver = "2"
+members = ["auth"]
