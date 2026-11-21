@@ -23,7 +23,7 @@ PR descriptions are drafted in `pr-drafts/` (not committed).
 
 What's built is the foundation: startup checks, migrations, health and metrics, the live-update WebSocket server, graceful shutdown and the load-test tool. No login and no event features yet.
 
-**Next: `POST /api/v1/notify`** (assigned in Ricky's handoff), on `kenny/notify` on top of this stack.
+**`POST /api/v1/notify`** (assigned in Ricky's handoff) is built on `kenny/notify`, on top of this stack, local only. It stores `{ "email" }` (trimmed, lowercased) in `notify_signups` and answers 204 whether or not the address was new, so the form can't reveal who signed up. Bad input gets 400/413/415/422, and 10 new addresses per client per hour gets 429. CORS allows only `https://geauxhack.com`, and the body is capped at 1KB. The limit is counted in Postgres per `X-Real-IP`; requests without it share one bucket. When wiring auth: give `POST /api/v1/notify` a `Public` policy and keep its CORS layer outside `auth::layer`, or the browser's `OPTIONS` preflight gets 403.
 
 **Rebase onto auth, accepted from `handoffs/ricky.md`:**
 - Use auth's `server/Cargo.toml`, `server/docker-compose.yml` and `server/migrations/` (moving mine from `server/app/migrations/`). My schema becomes `0002` and ALTERs auth's `users` instead of creating it.
@@ -52,7 +52,7 @@ Measured (server in Docker limited to 2 CPUs, bench in Docker on the same machin
 Test flake: `queue_positions_can_be_swapped_but_not_duplicated` failed once in about 15 full runs and couldn't be reproduced. Schema tests now use a plain pool instead of the 2s production limits, and CI runs 4 tests at a time. Heavier stress (30 containers at once) only produced container startup timeouts.
 
 Josh's backend requests, as of his 2026-11-17 handoff on the `landing-page` branch:
-- In progress: `POST /api/v1/notify` taking `{ "email" }`, stored for the "registration is open" email, CORS allowing `https://geauxhack.com` (the landing page posts to it cross-origin). Needs a table, a CORS layer and basic abuse limits.
+- Built, not merged (see above): `POST /api/v1/notify` taking `{ "email" }`, stored for the "registration is open" email, CORS allowing `https://geauxhack.com` (the landing page posts to it cross-origin). Needs a table, a CORS layer and basic abuse limits.
 - A schedule endpoint returning `EventInfo` and `ScheduleItem[]` from `apps/client/src/schedule/types.ts`.
 - A current-user profile with `firstName` and `team` (needs auth).
 - The application API, and the team pick endpoint with the 52% cap. The live team split needs one more topic kind (e.g. `event:split`), a few lines in `server/app/src/topic.rs`.
@@ -95,6 +95,7 @@ Checked against Josh's three draft branches (2026-11-18): all merge cleanly with
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
 | josh | Either add `server/` to `.prettierignore`, or confirm the backend should follow Prettier for its Markdown and YAML. Your CI runs `prettier --check .` on every PR with no path filter, and `server/README.md` fails it, so each backend PR would fail your check once it's on `main`. | Backend PRs passing CI | before PR 1.1 merges |
+| infra | The reverse proxy sets `X-Real-IP` to the client's address on every request to the API, overwriting any value the client sent (nginx: `proxy_set_header X-Real-IP $remote_addr;`) | The notify form's per-client limit; without it every visitor shares one limit of 10 an hour | before the landing page goes public |
 | infra | Container stop grace period of at least 20s, the load balancer polling `/readyz`, `/api/v1/ws` routed with WebSocket upgrades, port 9090 kept internal | Zero-downtime deploys; 15s drain | before the January mock run |
 | database | Schema gaps in design doc §5: a team membership table, `sponsor_keys`, a table for photo face embeddings, and loan history in `hardware_loans` | Later backend PRs (auth, scanning) | 2026-11-24 |
 | auth | Replace `auth::AllowAll` with real rules. Covered by Tamely/gh-core#7 (`ws_caller`, `ws_first_message`, `may_subscribe`); I wire them in when rebasing. Remove this row once #7 merges. | Live updates are open to anyone until then | with the auth PR |
