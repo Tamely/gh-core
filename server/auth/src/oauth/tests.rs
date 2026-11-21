@@ -20,7 +20,7 @@ async fn setup(schema: &str) -> Arc<AuthState> {
     let db = PgPool::connect_with(opts.options([("search_path", schema)])).await.unwrap();
     sqlx::raw_sql(include_str!("../../../migrations/0001_users_and_auth.sql")).execute(&db).await.unwrap();
     let redis = Builder::from_config(RedisConfig::from_url(&std::env::var("REDIS_URL").unwrap()).unwrap())
-        .with_performance_config(|c| c.default_command_timeout = Duration::from_secs(1))
+        .with_performance_config(|c| c.default_command_timeout = Duration::from_secs(5))
         .build()
         .unwrap();
     redis.init().await.unwrap();
