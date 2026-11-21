@@ -69,6 +69,9 @@ async fn call(state: &Arc<AuthState>, path: &str, body: Value, origin: Option<&s
     let status = response.status().as_u16();
     let headers = response.headers().clone();
     assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    if path.starts_with("/api/v1/auth/oauth/") {
+        assert_eq!(headers[header::REFERRER_POLICY], "no-referrer");
+    }
     let body = axum::body::to_bytes(response.into_body(), 1 << 16).await.unwrap();
     (status, headers, serde_json::from_slice(&body).unwrap_or(Value::Null))
 }
@@ -165,6 +168,7 @@ async fn code_then_github_share_account_roles_and_web_and_native_sessions() {
             assert!(body.get("token").is_none());
             let cookie = headers[header::SET_COOKIE].to_str().unwrap();
             assert!(cookie.contains("Secure; HttpOnly; SameSite=Lax"));
+            assert!(cookie.contains("Path=/; Max-Age=1209600"));
             cookie.split(';').next().unwrap().split_once('=').unwrap().1
         } else {
             assert!(!headers.contains_key(header::SET_COOKIE));
@@ -174,6 +178,38 @@ async fn code_then_github_share_account_roles_and_web_and_native_sessions() {
         assert_eq!(claims.sub, id);
         assert_eq!(claims.exp, NOW + crate::SESSION_SECS);
         assert_eq!(call(&state, "/api/v1/auth/oauth/github/complete", completion(&begin), origin).await.0, 401);
+        let (auth_header, auth_value) = if origin.is_some() {
+            (header::COOKIE, format!("{}={token}", crate::COOKIE))
+        } else {
+            (header::AUTHORIZATION, format!("Bearer {token}"))
+        };
+        let app = crate::routes(state.clone()).layer(from_fn_with_state(state.clone(), crate::layer));
+        if origin.is_some() {
+            let request = Request::post("/api/v1/auth/logout")
+                .header(auth_header.clone(), &auth_value)
+                .header(header::ORIGIN, "https://evil.example")
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(app.clone().oneshot(request).await.unwrap().status(), 403);
+        }
+        // Reuse the original credential even after logout: rejection must come
+        // from server-side revocation, not just the browser deleting its cookie.
+        for (method, path, status) in
+            [("GET", "/api/v1/me", 200), ("POST", "/api/v1/auth/logout", 204), ("GET", "/api/v1/me", 401)]
+        {
+            let request = Request::builder()
+                .method(method)
+                .uri(path)
+                .header(auth_header.clone(), &auth_value)
+                .header(header::ORIGIN, ORIGIN)
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), status, "{method} {path}");
+            if status == 204 {
+                assert!(response.headers()[header::SET_COOKIE].to_str().unwrap().contains("Max-Age=0"));
+            }
+        }
     }
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users").fetch_one(&state.sessions.db).await.unwrap(),
@@ -348,6 +384,7 @@ async fn oidc_validates_signature_issuer_audience_nonce_expiry_and_verified_emai
     let key = jsonwebtoken::EncodingKey::from_rsa_pem(include_bytes!("test-key.pem")).unwrap();
     let jwks: Value = serde_json::from_str(include_str!("test-jwks.json")).unwrap();
     let mut state = setup("oauth_oidc").await;
+    let mut linked_id = None;
     for provider in [Provider::Google, Provider::Apple] {
         let name = if provider == Provider::Google { "google" } else { "apple" };
         let issuer =
@@ -467,14 +504,21 @@ async fn oidc_validates_signature_issuer_audience_nonce_expiry_and_verified_emai
                 token
             };
             *tokens.lock().await = json!({"id_token": token});
-            assert_eq!(
-                call(&state, &format!("/api/v1/auth/oauth/{name}/complete"), completion(&started), None).await.0,
-                if defect == "none" { 200 } else { 401 },
-                "{name}: {defect}"
-            );
+            let (status, _, profile) =
+                call(&state, &format!("/api/v1/auth/oauth/{name}/complete"), completion(&started), None).await;
+            assert_eq!(status, if defect == "none" { 200 } else { 401 }, "{name}: {defect}");
+            if defect == "none" {
+                let id = profile["id"].as_str().unwrap().to_owned();
+                assert_eq!(linked_id.get_or_insert(id.clone()), &id, "verified email links Google and Apple");
+                assert_eq!(profile["roles"], json!([]));
+            }
         }
         assert_eq!(fetches.load(std::sync::atomic::Ordering::SeqCst), 1, "JWKS must be cached across sign-ins");
     }
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM users").fetch_one(&state.sessions.db).await.unwrap(),
+        1
+    );
 }
 
 #[tokio::test]
