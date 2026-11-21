@@ -98,18 +98,43 @@ concurrent completion, verified-email linking, web/native delivery, rate limits,
 Redis failure and provider failures. The PEM files under `src/oauth/` are generated
 test-only keys, never deployment credentials.
 
-Live Google and GitHub tests on 2026-11-21 completed their provider exchanges and
-issued web session cookies (200). On local HTTP, Safari then omitted the Secure
-cookie and `/api/v1/me` returned 401. An authenticated browser profile/logout
-round-trip still needs verification using trusted HTTPS or a browser that accepts
-loopback HTTP Secure cookies. Live Apple testing needs its developer configuration
-and an HTTPS callback; production callback UI and physical-device deep links still
-need Josh’s integration.
+Live Google and GitHub tests on 2026-11-21 completed their provider exchanges,
+issued web session cookies and subsequently returned `/api/v1/me` 200 with the
+cookie sent. Earlier Safari attempts over local HTTP omitted the Secure cookie
+and returned 401 after successful exchange. The successful Google and GitHub
+flows used the same stored verified email and account (checked without recording
+personal details). Live browser logout returned 204 and the next profile request
+returned 401; its session was confirmed revoked in Postgres and cached with a
+positive TTL in Redis. Automated tests additionally resend the original cookie
+and native bearer token after logout, proving revocation independently of cookie
+clearing.
 
-After updating the stack to PR 2’s final `9e58acf` on 2026-11-21, all **36**
+## Acceptance status and deferred blockers
+
+The original sign-in acceptance criterion requires Google, GitHub and Apple to
+work on web, iOS and Android and return through the HTTPS Universal/App Link.
+The backend is implemented; that complete end-to-end criterion remains open.
+
+| Requirement | Current evidence | Remaining work / owner |
+|---|---|---|
+| Google and GitHub web sign-in | Live local exchanges and authenticated profile requests returned 200 for both providers; verified email linked both to one account. | Local check complete. Recheck on deployed HTTPS, including Safari. Auth/infra. |
+| Apple sign-in | Backend exchange, signed identity validation, client-secret signing and POST relay are tested with fixtures. | **Deferred by Ricky on 2026-11-21.** Obtain active Apple Developer Program membership (normally USD 99/year, or an approved fee waiver); team must decide the legal owner and Account Holder. Then configure App ID, Services ID, key and HTTPS return URL and test live. Team/ops/auth. |
+| Native OAuth on iOS and Android | Backend native token responses are tested. | Implement system-browser launch and callback handling in the Capacitor client, then test each provider on physical iPhone and Android devices. Josh/auth. |
+| Universal/App Link callback | Contract specifies `https://app.geauxhack.com/auth/callback` and documents verifier/state handling. | `app.geauxhack.com` did not resolve during the 2026-11-21 setup check. Configure DNS/HTTPS, host AASA/assetlinks, configure native associations, serve the GET callback UI and route Apple POST callbacks to the API. Josh/infra. |
+| Verified-email account linking and session delivery | Live Google/GitHub account reuse passed. Tests also cover code-to-GitHub role reuse, Google/Apple account reuse, web cookie flags and native tokens. Provider tokens are not persisted. | Backend check complete. Wire the production client to the documented contract; native secure storage and offline startup are tracked in PR 5. |
+| Logout and immediate revocation | Live logout 204 → profile 401, Postgres revocation and Redis cache confirmed. Automated OAuth flows check original cookie/bearer rejection after logout and cross-site logout 403. | Local/backend check complete. |
+| OAuth security and authorization | Automated tests cover verifier/state/provider/Origin binding, single use/concurrent completion, signed identity claims, failure handling, abuse limits and route × role policies. | No additional backend implementation gap identified by this acceptance audit. Apple uses nonce plus verifier-bound completion rather than provider-side PKCE, as documented above. |
+
+Apple remains disabled while its environment variables are absent. Do not mark
+Apple or the full web/iOS/Android criterion complete from fixture tests alone.
+PR 2 owns email/SMS delivery acceptance; judge-room timing/access and general
+offline-startup acceptance belong to their respective PRs.
+
+After extending OAuth session/revocation and linking assertions on 2026-11-21, all **36**
 combined auth/code/OAuth tests passed, along with Clippy (`--all-targets -- -D warnings`)
-and the release library check (`--release --lib`). OAuth formatting uses the
-existing compact layout:
+and the release library check (`--release --lib`). The acceptance pass reviewed the new assertions and scoped the no-referrer check
+to OAuth responses (the helper also calls email-code verification). No production
+implementation changes were needed. OAuth formatting uses the existing compact layout:
 
 ```sh
 rustfmt --edition 2021 --config max_width=120,use_small_heuristics=Max --check auth/src/oauth.rs
