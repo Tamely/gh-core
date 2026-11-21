@@ -5,16 +5,18 @@ edition = "2021"
 publish = false
 
 [dependencies]
-axum = { version = "0.8", default-features = false, features = ["json"] }
+axum = "0.8"
 base64 = "0.22"
 ed25519-dalek = { version = "2", features = ["pkcs8", "pem"] }
+# Kenny's server uses fred too, so the server has one Redis client, shared with auth.
+fred = "10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
 
 [dev-dependencies]
 # Independent JWT library, used only to prove other software can verify our tokens.
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tower = { version = "0.5", features = ["util"] }

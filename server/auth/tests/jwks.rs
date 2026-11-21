@@ -1,27 +1,30 @@
 //! Step 3: someone with only the JWKS can check our tokens.
 
+mod common;
+
 use std::{sync::Arc, time::SystemTime};
 
-use auth::{routes, Claims, Keys, Role, SESSION_SECS};
-use axum::{body::Body, http::Request};
+use auth::{policies, AuthState, Claims, Keys, Role, Sessions, SESSION_SECS};
+use axum::Router;
+use common::*;
 use ed25519_dalek::SigningKey;
-use tower::ServiceExt;
 
 #[tokio::test]
 async fn jwks_lets_another_library_verify_our_tokens() {
     let old = SigningKey::from_bytes(&[2; 32]).verifying_key();
-    let keys = Arc::new(Keys::new(SigningKey::from_bytes(&[1; 32]), vec![old]));
+    let keys = Keys::new(SigningKey::from_bytes(&[1; 32]), vec![old]);
+    // Public route: works with both databases down.
+    let sessions = Sessions { db: dead_db(), redis: dead_redis().await };
+    let state = Arc::new(AuthState { keys, origin: ORIGIN.into(), now: || NOW, sessions, policies: policies() });
 
-    let res = routes(keys.clone())
-        .oneshot(Request::get("/.well-known/jwks.json").body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    assert_eq!(res.status(), 200);
-    assert_eq!(res.headers()["cache-control"], "public, max-age=300");
-    let body = axum::body::to_bytes(res.into_body(), 1 << 16).await.unwrap();
+    let res = call(&app(state.clone(), Router::new()), "GET", "/.well-known/jwks.json", &[]).await;
+    assert_eq!(res.status, 200);
+    assert_eq!(res.headers["cache-control"], "public, max-age=300");
+    let body = res.body.as_bytes();
+    let keys = &state.keys;
 
     // Current key and old key, public parts only.
-    let set: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let set: serde_json::Value = serde_json::from_slice(body).unwrap();
     assert_eq!(set["keys"].as_array().unwrap().len(), 2);
     assert!(set["keys"].as_array().unwrap().iter().all(|k| k.get("d").is_none()));
 
@@ -37,7 +40,7 @@ async fn jwks_lets_another_library_verify_our_tokens() {
     };
     let token = keys.issue(&claims);
 
-    let set: jsonwebtoken::jwk::JwkSet = serde_json::from_slice(&body).unwrap();
+    let set: jsonwebtoken::jwk::JwkSet = serde_json::from_slice(body).unwrap();
     let kid = jsonwebtoken::decode_header(&token).unwrap().kid.unwrap();
     let jwk = set.find(&kid).expect("token's kid is in the JWKS");
     let key = jsonwebtoken::DecodingKey::from_jwk(jwk).unwrap();

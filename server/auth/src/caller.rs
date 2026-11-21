@@ -1,23 +1,32 @@
-//! Who is calling: read the session token from the cookie (web) or the
-//! `Authorization: Bearer` header (native), and put a [`Caller`] on the request.
+//! Who is calling, and may they? One layer in front of every route:
+//!
+//! 1. Read the token from the cookie (web) or `Authorization: Bearer` (native).
+//! 2. Cookie requests that change data must come from our own page (`Origin`).
+//! 3. Look up the route's policy; no entry means 403.
+//! 4. Drop revoked sessions (Redis, else Postgres, else 503).
+//! 5. Check the policy, run the handler, renew the session if it's due.
 
 use std::sync::Arc;
 
 use axum::{
-    extract::{Request, State},
-    http::{header, HeaderMap, Method, StatusCode},
+    extract::{MatchedPath, RawPathParams, Request, State},
+    http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
+    RequestExt,
 };
 
-use crate::{Claims, Keys};
+use crate::{Claims, Keys, Policies, Policy, Sessions, SESSION_SECS};
 
 /// Web session cookie. `__Host-` makes browsers insist on Secure, Path=/ and no Domain.
 pub const COOKIE: &str = "__Host-session";
 
+/// Native clients read a renewed token from this response header and store it.
+pub const RENEWED_TOKEN: HeaderName = HeaderName::from_static("x-session-token");
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Caller {
-    /// No token, or one that's invalid or expired.
+    /// No token, or one that's invalid, expired or revoked.
     Anonymous,
     Signed { claims: Claims, via: Via },
 }
@@ -34,9 +43,20 @@ pub struct AuthState {
     pub origin: String,
     /// Unix seconds. Real servers pass the system clock; tests pass a fixed time.
     pub now: fn() -> i64,
+    pub sessions: Sessions,
+    /// Start from `auth::policies()` and add every server route.
+    pub policies: Policies,
 }
 
-/// Bearer wins if both are present: only native sends it, and it can't be forged cross-site.
+/// `Set-Cookie` value for a session token. `Max-Age=0` with an empty token clears it.
+pub fn session_cookie(token: &str) -> HeaderValue {
+    let max_age = if token.is_empty() { 0 } else { SESSION_SECS };
+    let cookie = format!("{COOKIE}={token}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}");
+    HeaderValue::from_str(&cookie).expect("a JWT is valid in a header")
+}
+
+/// Signature and expiry only, no revocation. Bearer wins if both are present:
+/// only native sends it, and it can't be forged cross-site.
 pub fn identify(headers: &HeaderMap, keys: &Keys, now: i64) -> Caller {
     let (token, via) = match (bearer(headers), cookie(headers)) {
         (Some(t), _) => (t, Via::Bearer),
@@ -49,20 +69,71 @@ pub fn identify(headers: &HeaderMap, keys: &Keys, now: i64) -> Caller {
     }
 }
 
-/// Axum middleware: `.layer(axum::middleware::from_fn_with_state(state, auth::layer))`.
-/// Handlers read the result with `Extension<Caller>`.
-///
-/// Cookie requests that change data must come from our own page (`Origin` matches).
-/// SameSite=Lax already stops most cross-site requests; this is the second lock.
+/// A revoked session becomes `Anonymous`; 503 if revocation can't be checked.
+pub(crate) async fn unrevoked(state: &AuthState, caller: Caller, now: i64) -> Result<Caller, StatusCode> {
+    let Caller::Signed { claims, .. } = &caller else { return Ok(caller) };
+    match state.sessions.is_revoked(&claims.sid, now).await {
+        Ok(false) => Ok(caller),
+        Ok(true) => Ok(Caller::Anonymous),
+        Err(_) => Err(StatusCode::SERVICE_UNAVAILABLE),
+    }
+}
+
+/// True if a cookie caller's `Origin` isn't our web app's.
+pub(crate) fn cross_site(state: &AuthState, caller: &Caller, headers: &HeaderMap) -> bool {
+    matches!(caller, Caller::Signed { via: Via::Cookie, .. })
+        && headers.get(header::ORIGIN).is_none_or(|o| o != state.origin.as_str())
+}
+
+/// Axum middleware for the whole app (`Router::layer`, so it sees the matched route):
+/// `.layer(axum::middleware::from_fn_with_state(state, auth::layer))`.
+/// Handlers read the caller with `Extension<Caller>`.
 pub async fn layer(State(state): State<Arc<AuthState>>, mut req: Request, next: Next) -> Response {
-    let caller = identify(req.headers(), &state.keys, (state.now)());
+    let now = (state.now)();
+    let caller = identify(req.headers(), &state.keys, now);
+
+    // SameSite=Lax already stops most cross-site requests; this is the second lock.
     let changes_data = !matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    let from_our_page = req.headers().get(header::ORIGIN).is_some_and(|o| o == state.origin.as_str());
-    if matches!(caller, Caller::Signed { via: Via::Cookie, .. }) && changes_data && !from_our_page {
+    if changes_data && cross_site(&state, &caller, req.headers()) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    req.extensions_mut().insert(caller);
-    next.run(req).await
+
+    let method = if req.method() == Method::HEAD { &Method::GET } else { req.method() };
+    let route = req.extensions().get::<MatchedPath>().map(|p| format!("{method} {}", p.as_str()));
+    let Some(policy) = route.and_then(|r| state.policies.get(&r)) else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    if *policy == Policy::Public {
+        req.extensions_mut().insert(Caller::Anonymous);
+        return next.run(req).await;
+    }
+
+    let caller = match unrevoked(&state, caller, now).await {
+        Ok(caller) => caller,
+        Err(status) => return status.into_response(),
+    };
+    let params = req.extract_parts::<RawPathParams>().await.ok();
+    let room_id = params.as_ref().and_then(|p| p.iter().find(|(k, _)| *k == "room_id").map(|(_, v)| v));
+    if let Err(status) = policy.check(&caller, room_id) {
+        return status.into_response();
+    }
+
+    req.extensions_mut().insert(caller.clone());
+    let mut res = next.run(req).await;
+
+    if let Caller::Signed { claims, via } = caller {
+        // A failed renewal isn't worth failing the request for; the next one retries.
+        if let Ok(Some(renewed)) = state.sessions.renew(&claims, now).await {
+            let token = state.keys.issue(&renewed);
+            let headers = res.headers_mut();
+            if via == Via::Cookie {
+                headers.append(header::SET_COOKIE, session_cookie(&token));
+            } else {
+                headers.insert(RENEWED_TOKEN, HeaderValue::from_str(&token).expect("a JWT is valid in a header"));
+            }
+        }
+    }
+    res
 }
 
 fn bearer(headers: &HeaderMap) -> Option<&str> {
