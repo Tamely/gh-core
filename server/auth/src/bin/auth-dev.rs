@@ -38,13 +38,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let env = |name: &str| std::env::var(name).map_err(|_| format!("set {name}"));
     let url = env("DATABASE_URL")?;
-    // Refuse anything but a database on this machine, so a tunnelled droplet URL
-    // left in the shell can't get dev admins written into it.
-    let host = url.rsplit('@').next().unwrap_or("").split(['/', ':']).next().unwrap_or("");
-    if !["127.0.0.1", "localhost", "host.docker.internal", "[::1]"].contains(&host) {
-        return Err(format!("auth-dev only runs against a local database, not {host:?}").into());
+    // Refuse anything but the compose database (this machine, port 5432), so a
+    // droplet URL left in the shell can't get dev admins written into it. Parsed
+    // by sqlx itself, so `?host=` tricks can't slip past. A tunnel the droplet
+    // is reachable through also listens on 127.0.0.1, so keep tunnels off 5432.
+    let opts: sqlx::postgres::PgConnectOptions = url.parse()?;
+    let (host, port) = (opts.get_host(), opts.get_port());
+    if !["127.0.0.1", "localhost", "host.docker.internal", "::1", "[::1]"].contains(&host) || port != 5432 {
+        return Err(format!("auth-dev only runs against the local compose database, not {host}:{port}").into());
     }
-    let db = sqlx::PgPool::connect(&url).await?;
+    let db = sqlx::PgPool::connect_with(opts).await?;
     // Same migration runner and bookkeeping the server will use.
     sqlx::migrate!("../migrations").run(&db).await?;
     let redis = Builder::from_config(Config::from_url(&env("REDIS_URL")?)?)

@@ -66,6 +66,9 @@ async fn sessions_and_revocation() {
     assert_eq!(me(&app, &phone).await, 401, "after Redis lost its data");
     let ready: Option<String> = redis.get("gh:revoked:ready").await.unwrap();
     assert!(ready.is_some(), "cache reloaded");
+    // Now Redis answers on its own (the marker is back), so this only passes if
+    // the reload put the revoked keys back too.
+    assert_eq!(me(&app, &phone).await, 401, "answered from the refilled cache");
 
     // Redis down: Postgres answers. Both down: 503, never let a maybe-revoked token in.
     let fresh = token(s, k, &ricky, NOW).await;

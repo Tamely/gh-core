@@ -179,7 +179,8 @@ impl Sessions {
             return Ok(None);
         }
         let exp = now + SESSION_SECS;
-        let renewed = sqlx::query("UPDATE sessions SET expires_at = to_timestamp($2) WHERE id = $1::uuid AND revoked_at IS NULL")
+        // GREATEST: two renewals racing must never move the end backwards.
+        let renewed = sqlx::query("UPDATE sessions SET expires_at = GREATEST(expires_at, to_timestamp($2)) WHERE id = $1::uuid AND revoked_at IS NULL")
             .bind(&claims.sid)
             .bind(exp)
             .execute(&self.db)
