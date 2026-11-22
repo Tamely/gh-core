@@ -1,0 +1,4 @@
+# gh-core server workspace. Auth lands first; Kenny's server crates join `members` when he rebases.
+[workspace]
+resolver = "2"
+members = ["auth"]
