@@ -2,8 +2,9 @@
 // app can start offline. The server still checks every request.
 //
 // Web: the session is the HttpOnly cookie, which JavaScript can't read.
-// Native: cookies don't work in the capacitor:// web view, so the token comes in
-// the response body and lives in the Keychain / Keystore (secure.ts).
+// Native: the app runs at capacitor://localhost, so API calls go to `base` through
+// native HTTP (no cookies, no CORS). The token comes in the response body and
+// lives in the Keychain / Keystore (native.ts).
 // Both: the profile (id, roles, exp, roomId; nothing secret) is kept in the
 // app's KeyValueStore, so startup can tell signed in from expired with no
 // network call.
@@ -37,6 +38,8 @@ export type Deps = {
   /** Native only. `null` on the web, where the cookie is the session. */
   tokens: TokenStore | null;
   fetch: typeof fetch;
+  /** The API's origin: "" on the web (same origin), e.g. "https://app.geauxhack.org" on native. */
+  base: string;
   /** Unix seconds. */
   now: () => number;
 };
@@ -54,7 +57,7 @@ function expOf(token: string): number | undefined {
   }
 }
 
-export function createAuth({ store, tokens, fetch, now }: Deps) {
+export function createAuth({ store, tokens, fetch, base, now }: Deps) {
   const read = async () => (await store()).get<Profile>(PROFILE);
   const keep = async ({
     id,
@@ -81,12 +84,12 @@ export function createAuth({ store, tokens, fetch, now }: Deps) {
     return { status: profile.exp > now() ? "signed-in" : "expired", profile };
   }
 
-  /** A same-origin API call with the session attached. A 401 means the session is over. */
+  /** An API call with the session attached. A 401 means the session is over. */
   async function api(path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     const token = await tokens?.get();
     if (token) headers.set("authorization", `Bearer ${token}`);
-    const res = await fetch(path, {
+    const res = await fetch(base + path, {
       ...init,
       headers,
       credentials: "same-origin",
@@ -112,7 +115,7 @@ export function createAuth({ store, tokens, fetch, now }: Deps) {
      * session as it was, so a bad placard doesn't sign anyone out.
      */
     async signIn(path: string, body: unknown): Promise<Session | Response> {
-      const res = await fetch(path, {
+      const res = await fetch(base + path, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),

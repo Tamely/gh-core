@@ -36,6 +36,8 @@ const jwt = (exp: number) =>
 
 type Call = { path: string; init: RequestInit };
 
+const API = "https://api.test";
+
 function setup(native: boolean, answer: (path: string) => Response | Error) {
   const calls: Call[] = [];
   let now = NOW;
@@ -44,9 +46,14 @@ function setup(native: boolean, answer: (path: string) => Response | Error) {
   const auth = createAuth({
     store: async () => store,
     tokens: native ? tokens : null,
+    base: native ? API : "",
     now: () => now,
     fetch: async (input, init = {}) => {
-      const path = String(input);
+      // Tests name paths; native calls must go to the API's origin.
+      const url = String(input);
+      if (native !== url.startsWith(API))
+        throw new Error(`wrong origin: ${url}`);
+      const path = native ? url.slice(API.length) : url;
       calls.push({ path, init });
       const res = answer(path);
       if (res instanceof Error) throw res;
