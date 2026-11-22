@@ -1,15 +1,5 @@
--- First migration: accounts and sessions. Kenny's design-doc §5 schema comes after this
--- and adds its columns to `users` with ALTER TABLE.
-
--- Only what sign-in needs. Emails are stored only once verified, lowercased.
--- Someone who signs in by SMS may have no email, and the reverse.
-CREATE TABLE users (
-    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email      TEXT UNIQUE CHECK (email = lower(email)),
-    phone_e164 TEXT UNIQUE CHECK (phone_e164 ~ '^\+[1-9][0-9]{1,14}$'),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (email IS NOT NULL OR phone_e164 IS NOT NULL)
-);
+-- Auth PR 1: account roles and sessions. Runs after the core schema (20261101…), which
+-- creates `users` (verified lowercase email and/or E.164 phone, at least one of them).
 
 -- Roles a user account holds. JUDGE_ROOM is not here on purpose: it only ever
 -- exists inside a session from the judge QR exchange, tied to one room.

@@ -210,22 +210,27 @@ fn hash(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
 
-/// Admin: creates a room (placard version 1), or moves its judging window.
-/// Times are unix seconds; judges are let in from `starts` until `ends`.
+/// Admin: sets a room's judging window. Times are unix seconds; judges are let in
+/// from `starts` until `ends`. The room must already exist (the core schema's
+/// `presentation_rooms` needs its track, floor and map position); `RowNotFound` if not.
+/// A room still on placard version 1 with no stored hash gets that placard's hash.
 pub async fn set_room(db: &PgPool, key: &JudgeKey, room_id: &str, starts: i64, ends: i64) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO presentation_rooms (room_id, token_version, token_hash, judging_starts_at, judging_ends_at)
-         VALUES ($1, 1, $2, to_timestamp($3), to_timestamp($4))
-         ON CONFLICT (room_id) DO UPDATE
-         SET judging_starts_at = EXCLUDED.judging_starts_at, judging_ends_at = EXCLUDED.judging_ends_at",
+    let updated = sqlx::query(
+        "UPDATE presentation_rooms
+         SET judging_starts_at = to_timestamp($3), judging_ends_at = to_timestamp($4),
+             token_hash = CASE WHEN token_version = 1 AND token_hash IS NULL THEN $2 ELSE token_hash END
+         WHERE room_id = $1",
     )
     .bind(room_id)
     .bind(hash(&key.placard(room_id, 1)))
     .bind(starts)
     .bind(ends)
     .execute(db)
-    .await
-    .map(drop)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(sqlx::Error::RowNotFound);
+    }
+    Ok(())
 }
 
 /// Admin: a new placard for a room. The old one stops working at once, and so

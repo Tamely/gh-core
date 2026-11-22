@@ -1,8 +1,10 @@
-//! The first migration loads and its rules hold.
+//! The auth migration loads after the core schema and its rules hold.
 //!
 //! Needs Postgres:
 //!   docker compose -f server/docker-compose.yml up -d
 //!   DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres cargo test -p auth
+
+mod common;
 
 use sqlx::{Connection, PgConnection};
 
@@ -22,15 +24,12 @@ async fn users_and_auth_migration() {
     sqlx::raw_sql(
         "DROP SCHEMA IF EXISTS auth_migration_test CASCADE;
          CREATE SCHEMA auth_migration_test;
-         SET search_path TO auth_migration_test;",
+         SET search_path TO auth_migration_test, public;",
     )
     .execute(&mut db)
     .await
     .unwrap();
-    sqlx::raw_sql(include_str!("../../migrations/0001_users_and_auth.sql"))
-        .execute(&mut db)
-        .await
-        .unwrap();
+    common::migrate(&mut db).await;
 
     // users
     let by_email = "INSERT INTO users (email) VALUES ($1)";

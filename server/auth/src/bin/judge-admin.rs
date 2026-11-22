@@ -44,7 +44,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .bind(ends)
             .fetch_one(&db)
             .await?;
-            set_room(&db, &key, room, starts, ends).await?;
+            match set_room(&db, &key, room, starts, ends).await {
+                Err(sqlx::Error::RowNotFound) => {
+                    return Err(format!("no room {room}: add it to presentation_rooms first (track, floor, map position)").into())
+                }
+                other => other?,
+            }
             println!("{room}: judging window set. Run `judge-admin print` for its placard.");
         }
         ["print", ref dir @ ..] => {

@@ -66,8 +66,9 @@ async fn judge_rooms() {
     state.sessions.reload(NOW).await.unwrap();
     let app = app(state.clone(), Router::new().route("/api/v1/rooms/{room_id}/queue", get(|| async { "ok" })));
     let key = judge_key();
-    for room in [ROOM, OTHER] {
-        set_room(&db, &key, room, START, END).await.unwrap();
+    for id in [ROOM, OTHER] {
+        room(&db, id).await;
+        set_room(&db, &key, id, START, END).await.unwrap();
     }
     let placard = key.placard(ROOM, 1);
 
@@ -230,10 +231,14 @@ async fn judge_rooms_migration() {
     let check = Some("23514");
 
     // Rooms: ids safe in URLs, file names and topics; the window runs forwards.
-    assert_eq!(code(&db, "INSERT INTO presentation_rooms (room_id) VALUES ('a/b')").await.as_deref(), check);
-    let backwards = "INSERT INTO presentation_rooms VALUES ('R0', 1, NULL, now(), now() - interval '1 hour')";
-    assert_eq!(code(&db, backwards).await.as_deref(), check);
-    assert_eq!(code(&db, "INSERT INTO presentation_rooms (room_id) VALUES ('R1')").await, None);
+    let insert = |id: &str, window: &str| {
+        format!("INSERT INTO presentation_rooms (room_id, track, floor_number, svg_x, svg_y, judging_starts_at, judging_ends_at) VALUES ('{id}', 'GENERAL', 1, 0, 0, {window})")
+    };
+    assert_eq!(code(&db, &insert("a/b", "NULL, NULL")).await.as_deref(), check);
+    assert_eq!(code(&db, &insert("R0", "now(), now() - interval '1 hour'")).await.as_deref(), check);
+    assert_eq!(code(&db, &insert("R1", "NULL, NULL")).await, None);
+    // set_room only moves the window of a room that exists.
+    assert!(matches!(set_room(&db, &judge_key(), "R9", NOW, NOW + HOUR).await, Err(sqlx::Error::RowNotFound)));
 
     // A session is a user's or a room's, never both or neither.
     let day = "now() + interval '1 day'";
@@ -265,6 +270,7 @@ async fn judge_rooms_migration() {
 #[ignore]
 async fn exchange_p99() {
     let db = db("auth_judge_bench").await;
+    room(&db, ROOM).await;
     set_room(&db, &judge_key(), ROOM, NOW - HOUR, NOW + HOUR).await.unwrap();
     let app = app(state(db, redis().await, || NOW), Router::new());
     let placard = judge_key().placard(ROOM, 1);

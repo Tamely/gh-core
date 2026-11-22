@@ -1,17 +1,5 @@
--- Judge room access (auth PR 4). Kenny's design-doc §5 schema comes later and
--- adds track, floor and map position to `presentation_rooms` with ALTER TABLE.
-
--- One row per presentation room. The placard token is never stored: only its
--- version and a SHA-256 hash. Rotating bumps the version, so old placards fail.
--- No judging window (NULL) means the room's placard doesn't work yet.
-CREATE TABLE presentation_rooms (
-    room_id           VARCHAR(32) PRIMARY KEY CHECK (room_id ~ '^[A-Za-z0-9_-]+$'),
-    token_version     INT NOT NULL DEFAULT 1 CHECK (token_version > 0),
-    token_hash        BYTEA UNIQUE,
-    judging_starts_at TIMESTAMPTZ,
-    judging_ends_at   TIMESTAMPTZ,
-    CHECK (judging_ends_at > judging_starts_at)
-);
+-- Judge room access (auth PR 4). The core schema's `presentation_rooms` already has the
+-- placard's token_version and token_hash (never the token) and the judging window.
 
 -- A session belongs to a user or, for judges, to a room. Never both, never neither.
 ALTER TABLE sessions
@@ -38,3 +26,4 @@ CREATE TABLE judge_exchange_audit (
     CHECK (outcome = 'ok' OR session_id IS NULL)
 );
 CREATE INDEX judge_exchange_audit_room_at ON judge_exchange_audit (room_id, at);
+CREATE INDEX judge_exchange_audit_session_id ON judge_exchange_audit (session_id);

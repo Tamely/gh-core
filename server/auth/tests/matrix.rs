@@ -31,8 +31,9 @@ async fn route_by_role_matrix() {
     // Stand-in route that needs a room; the real ones come with judging.
     Arc::get_mut(&mut state).unwrap().policies.insert("GET /api/v1/rooms/{room_id}/scores".into(), Policy::RequireRoom);
     state.sessions.reload(NOW).await.unwrap();
-    for room in ["room-a", "room-b"] {
-        auth::set_room(&db, &judge_key(), room, NOW - DAY, NOW + DAY).await.unwrap();
+    for id in ["room-a", "room-b"] {
+        room(&db, id).await;
+        auth::set_room(&db, &judge_key(), id, NOW - DAY, NOW + DAY).await.unwrap();
     }
 
     // Kenny's routes, stood in by handlers that just say OK, plus one with no policy.

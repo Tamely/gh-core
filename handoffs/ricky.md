@@ -2,6 +2,49 @@
 
 _Last updated: 2026-11-21_
 
+## ⚠️ Core schema PR: takes priority for migrations (2026-11-21)
+**This set of changes is the precedent for the database.** Its migrations run **first**, before every other gh-core migration. Any migration whose number conflicts with it (sorts before it, uses the same number, or creates a table it creates) **changes its number and its SQL**, not this one.
+
+**What it is:** branch `ricky/schema` (worktree `.claude/worktrees/schema` in the fork clone), PR: [Tamely/gh-core#13](https://github.com/Tamely/gh-core/pull/13). It covers the schema ticket: the main PostgreSQL 16 + pgvector database, with reversible sqlx migrations for every core table.
+- `server/migrations/`: 11 reversible `up.sql` / `down.sql` pairs, versions **`20261101000000` to `20261101001000`**, one logical change each: extension and shared `set_updated_at()` trigger, `users`, `teams` + `team_members`, `presentation_rooms`, `entitlements` + `entitlement_scans`, `hardware_assets` + `hardware_loans`, `sponsor_keys`, `mentor_tickets`, `notification_dispatches`, `judging_queue`, `face_embeddings` + `nearest_faces()`.
+- `server/schema.sql`: the committed `pg_dump --schema-only` snapshot.
+- `server/seeds/seed.sql`: synthetic data (1,000 users, 250 teams, 25 rooms, 5 entitlements, 5,000 scans, 500 assets, 600 sponsor keys, 1,000 random unit 512-d vectors). Not a migration.
+- `server/db-tests/run.sh` (+ `acceptance.sql`, `claim.pgbench`, `README.md`) checks every acceptance criterion; CI runs it in `.github/workflows/schema.yml`. Needs Docker and sqlx-cli (`brew install sqlx-cli`). `run.sh --update` rewrites `schema.sql` after a migration change.
+- `server/docker-compose.yml`: same file as the auth PRs' (identical, so it merges cleanly).
+
+**Migration numbering rule (everyone):** use timestamps (`sqlx migrate add -r <name>` makes a reversible pair with the current time). Nothing may sort at or before `20261101001000`. Tables this PR creates are changed later with `ALTER TABLE`, never created again. Every migration is an `up.sql` / `down.sql` pair, because the CI check runs everything down and up again.
+
+**What has to change elsewhere because of this:**
+- **Auth PR 1 (#7)** `0001_users_and_auth.sql` is version 1, so it would run *before* the core schema. Rename it to a timestamp after `20261101001000` as a reversible pair, and **remove its `CREATE TABLE users`**: the core `users` already has the same `email` / `phone_e164` rules and the email-or-phone check, so auth's code and tests keep working. It keeps `user_roles` and `sessions` (auth owns those).
+- **Auth PR 4 (#12)** `0002_judge_rooms.sql`: same renumbering, and **remove its `CREATE TABLE presentation_rooms`**: the core table already has `token_version`, `token_hash`, `judging_starts_at` / `judging_ends_at` with the same checks. It keeps `sessions.room_id` and `judge_exchange_audit`. The core table also has `track`, `floor_number`, `svg_x`, `svg_y` as NOT NULL (design doc §5), so `judge-admin room` and the judge tests must supply them (or only update the window on rooms that already exist).
+- **Auth PR 3 (#10)**: the `0003` reservation is dropped; use a timestamp if it needs a migration.
+- **Kenny**: delete `server/app/migrations/20261117000000_initial_schema.sql`; this PR replaces it, including his fixes (`gen_random_uuid()`, deferred queue uniqueness). Move `notify_signups` to `server/migrations/` as a reversible pair (its `20261121000000` already sorts after the core schema). Point the runner at the shared folder: `sqlx::migrate!("../migrations")`.
+- **Dev databases** that already applied `0001` / `0002`: `docker compose -f server/docker-compose.yml down -v` (sqlx would see the history change).
+
+**Decisions (and why):**
+- **No `uuid-ossp`**: ids use `gen_random_uuid()`. Natural keys where they exist: `room_id`, `entitlement_id`, `asset_qr`.
+- **pgvector 0.8+ is checked by the first migration**: it fails with a clear message on an older version, since iterative scans need 0.8.
+- **`users` profile columns are nullable** (`full_name`, `school`, `qr_hmac_sig`): a first sign-in has none of them. Email or phone is required.
+- **The face embedding has its own table** (`face_embeddings`, keyed by `user_id`, `ON DELETE CASCADE`), not a `users` column, so deleting a user deletes it and the HNSW index is on a small table.
+- **ON DELETE rule:** rows *about* a user cascade (scans, team membership, notifications, face embedding). A user as the *actor* (`scanned_by`, `checked_out_by`, `claimed_by`) becomes NULL. **RESTRICT** where a deletion would lose track of property or access: `hardware_loans.user_id` (an unreturned loan would vanish), `sponsor_keys.claimed_by_team` (a seen key would go back into the pool), `entitlement_scans.entitlement_id`, `hardware_loans.asset_qr`. A check fails if any foreign key is left on the default NO ACTION.
+- **Every foreign key column leads an index**; the test checks this from the catalog.
+- **Statuses are `CHECK (… IN …)`**, not enums.
+- **`updated_at` on every mutable table**, kept current by `set_updated_at()`.
+- **Hardware is assets + loans**: §5 had one row per asset, so a return erased the loan. A partial unique index allows at most one open loan per asset.
+- **`judging_queue (room_id, seq_index)` is `DEFERRABLE INITIALLY DEFERRED`**, checked at COMMIT, so a swap works in one transaction. **`entitlement_scans`' primary key stays non-deferrable**, because ON CONFLICT can't use a deferrable key.
+- **`sponsor_keys`**: partial index `(sponsor_slug, id) WHERE claimed_by_team IS NULL` for the design doc's `FOR UPDATE SKIP LOCKED` claim, and `UNIQUE (claimed_by_team, sponsor_slug)`: one key per sponsor per team.
+- **Vector search goes through `nearest_faces(query, k)`**: top k by `ORDER BY embedding <=> $1 LIMIT k` in a materialized CTE, then `distance <= 0.32`. The function sets `hnsw.iterative_scan = relaxed_order`, `hnsw.ef_search = 100` and `enable_seqscan = off`. With only ~1,000 rows the planner otherwise picks a sequential scan, and the default `ef_search` of 40 is below `k = 50`. The settings live on the function, not `ALTER DATABASE`, so they're in `schema.sql` and reversible. Raw queries must set the same three.
+- **The snapshot drops `--` comments, blank-line runs and pg_dump's per-run `\restrict` key** (new in Postgres 16.10), so runs and minor versions compare equal. `_sqlx_migrations` is left out of it.
+- **sqlx-cli 0.9.1** in CI and locally.
+
+**Results (2026-11-21):**
+- Local (Docker on Ricky's Mac): every check passes. Duplicate check p99 0.02ms; vector search p99 ~1ms (median 0.7), HNSW index used, top-50 recall 0.992, threshold recall 1.0; 50 concurrent claims → 50 different keys in ~1s with `lock_timeout` 100ms. Sabotage-checked: removing SKIP LOCKED, the deferral, the open-loan index, a `DROP` in a down file, an FK index, or an `ON DELETE` each makes it fail.
+- **Staging** (droplet Postgres 16.16, pgvector 0.8.7, in a throwaway database, since dropped): all 11 migrations up, seed, every acceptance check, all down leaving nothing behind. **Vector p99 isn't reliable there:** median 1.6–1.9ms, but p99 came out between 1.9 and 7ms across fresh runs, because the droplet is one shared vCPU that also runs the staging API, Redis and Caddy. Re-measure after the planned resize (≥ 2 vCPU / 4GB). On staging the migrations were applied file by file with `psql` (no sqlx there); sqlx itself is tested locally and in CI.
+
+**Open:**
+- The ticket's table list didn't come through when pasted; the tables come from §5 plus everything the acceptance criteria and other handoffs need. Check it against the ticket.
+- Josh's applications, team alliance and points ledger tables are **not** in this ticket and still have no owner.
+
 ## Owns
 **Auth: authentication and authorization for gh-core.** Sign-in, sessions, judge room access, roles. Built in **Rust** as the `server/auth` crate, plugged into Kenny's Axum server in `server/` (see `handoffs/kenny.md`, PR #4).
 
@@ -47,7 +90,7 @@ _Last updated: 2026-11-21_
 
 **Order (from Ricky's senior dev, 2026-11-20): all five auth PRs and the Postgres host are finished and pushed before Kenny pushes his server stack.** Local Docker counts as the host for now; it will most likely have to be the droplet. So auth lands on `main` first and Kenny builds on it:
 - `server/Cargo.toml` and `server/docker-compose.yml` are the **real** files. Kenny merges his members and services into them.
-- `server/migrations/0001_users_and_auth.sql` is the **first** migration and creates a minimal `users` table; `0002_judge_rooms.sql` (PR 4) creates a minimal `presentation_rooms`. Kenny's spec migration comes after the last auth migration and **adds** his columns to both with ALTER TABLE instead of creating them.
+- **Superseded by the core schema PR (see the top of this file):** the core schema migrations (`20261101…`) run first and create `users` and `presentation_rooms`; auth's migrations are renumbered after them and only add `user_roles`, `sessions`, `sessions.room_id` and `judge_exchange_audit`.
 - Auth is a set of building blocks with no server around it, tested on a small stand-in router: `auth::layer` (who is calling, policy map with default deny, revocation, renewal), `auth::routes`, and `auth::ws_caller` / `ws_first_message` / `may_subscribe` for WebSockets. Kenny's server builds an `AuthState` (his `PgPool` and fred client go in `Sessions`), calls `sessions.reload(now)` at startup, merges `auth::routes`, adds a policy for each of his routes to `auth::policies()`, puts `auth::layer` on the whole router with `Router::layer`, and uses the WebSocket functions in place of `auth::AllowAll`.
 
 No Rust toolchain on Ricky's Mac yet: tests run in Docker (`rust:1-slim-bookworm`, Postgres from `pgvector/pgvector:pg16`):
@@ -193,13 +236,11 @@ Web relies on the HttpOnly cookie. Native keeps the token in the Keychain / Keys
 ## Needs from others
 | For | What's needed | Why / blocks | By |
 |---|---|---|---|
-| Kenny | **Rebase onto auth once it's on `main`** (see Status for how to wire `AuthState`, `auth::layer`, `auth::routes` and the policy map; share your fred client, built with a 1s `default_command_timeout` (without one a Redis outage hangs requests instead of falling back to Postgres); `.layer(auth::layer)` goes last; use your migration runner on `server/migrations`, which already has sqlx bookkeeping from `auth-dev`) (per Ricky's senior dev, auth and Postgres land first). Your §5 migration becomes 0002: `users` already exists from `0001_users_and_auth.sql` (`id`, `email`, `phone_e164`, `created_at`), so ALTER it to add your columns. Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
+| Kenny | **Rebase onto auth once it's on `main`** (see Status for how to wire `AuthState`, `auth::layer`, `auth::routes` and the policy map; share your fred client, built with a 1s `default_command_timeout` (without one a Redis outage hangs requests instead of falling back to Postgres); `.layer(auth::layer)` goes last; use your migration runner on `server/migrations`, which already has sqlx bookkeeping from `auth-dev`) (per Ricky's senior dev, auth and Postgres land first). Your §5 migration is replaced by the core schema PR (top of this file). Merge your members/services into `server/Cargo.toml` and `server/docker-compose.yml`. Replace `auth::AllowAll` with auth's topic check. | Keeps one migration history and closes the open WebSocket | when auth is on `main` |
 | Kenny | You take `POST /api/v1/notify` next; Ricky is on auth. | Answers "notify or auth next" in your handoff | — |
-| Kenny / database | When your §5 migration adds `full_name`, `school`, `qr_hmac_sig` to `users`, make them nullable (or filled later); `phone_e164` already is (0001). A first Google/GitHub/Apple or code sign-in has none of them. | Code sign-in (PR 2) and OAuth would fail to create users | with your §5 migration |
 | Kenny | Serve with `into_make_service_with_connect_info::<SocketAddr>()` (as `auth-dev serve` does), so the sign-in code routes can see the caller's IP when no proxy header is there; without it they return 500 | Per-IP rate limits on sign-in codes (PR 2) | when you rebase onto auth |
 | Kenny | **PR 4 is back with Ricky** (2026-11-21); ignore the requirements doc's "Kenny builds PR 4". | Avoids two people building it | now |
-| Kenny / database | Your §5 migration later ALTERs `presentation_rooms` (adds `track`, `floor_number`, `svg_x`, `svg_y`) and drops `panel_hmac_token`, instead of creating the table. | One migration history | with your §5 migration |
-| Kenny / PR 3 | **Migration numbers:** PR 4 takes `0002_judge_rooms.sql`. PR 2 adds none; PR 3 uses `0003` if it needs one. Kenny's §5 migration goes after the last auth migration. | Migration conflicts | before PR 3 adds a migration |
+| Kenny / PR 3 / auth | **Migration numbers:** the core schema PR's migrations (`20261101000000`–`20261101001000`) run first and take priority. Everything else uses a later timestamp as a reversible pair and ALTERs core tables instead of creating them. Kenny: drop `20261117000000_initial_schema.sql` (replaced) and use `sqlx::migrate!("../migrations")`. See the top of this file. | One migration history, CI's down/up check | before your next migration |
 | Josh | `handoffs/josh.md` says `/api/*` goes to "the Rust server": correct, the backend is Rust (Kenny's Axum server). No change needed. | — | — |
 | ops | Google OAuth client IDs (web, iOS, Android) | OAuth PR | before OAuth PR |
 | ops | GitHub OAuth app | OAuth PR | before OAuth PR |
@@ -221,6 +262,7 @@ Web relies on the HttpOnly cookie. Native keeps the token in the Keychain / Keys
 ## Done for others
 | For | What was done | Link |
 |---|---|---|
+| Kenny | Your "database: schema gaps in design doc §5" need: team membership (`team_members`), `sponsor_keys`, face embeddings (`face_embeddings`), loan history (`hardware_assets` + `hardware_loans`), plus `entitlements`. Core schema PR | [#13](https://github.com/Tamely/gh-core/pull/13) |
 | Josh | Picked the native secure-storage plugin (your "Which secure-storage plugin" need): `@aparajita/capacitor-secure-storage` 8.0.1, wired in PR 5 | [#11](https://github.com/Tamely/gh-core/pull/11) |
 
 ## Notes for the next session
