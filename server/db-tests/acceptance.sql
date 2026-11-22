@@ -144,8 +144,11 @@ DECLARE
                    'SELECT user_id, distance FROM nearest WHERE distance <= 0.32 ORDER BY distance';
     top50 text := 'SELECT array_agg(user_id) FROM (SELECT user_id FROM face_embeddings ORDER BY embedding <=> %L::vector(512) LIMIT 50) s';
 BEGIN
-    -- Warm-up: the first index scan in a session loads the index's metadata.
-    PERFORM count(*) FROM nearest_faces((SELECT v FROM queries LIMIT 1));
+    -- Warm-up: one untimed pass, so the timed pass measures a warm index (as the
+    -- running API sees it) rather than the first page reads after the seed.
+    FOR q IN SELECT v FROM queries LOOP
+        PERFORM count(*) FROM nearest_faces(q.v);
+    END LOOP;
     FOR q IN SELECT v FROM queries LOOP
         EXECUTE 'EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ' || format(search, q.v, q.v) INTO j;
         IF j::text NOT LIKE '%"Index Name": "face_embeddings_embedding"%' THEN
