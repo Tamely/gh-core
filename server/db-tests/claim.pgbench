@@ -1,0 +1,13 @@
+-- One sponsor key claim per pgbench client, each for a different team (by client_id).
+-- Each holds its lock for 0.5s so all 50 overlap; lock_timeout turns any wait into an
+-- error, so a claim that blocks fails the run.
+BEGIN;
+SET LOCAL lock_timeout = '100ms';
+UPDATE sponsor_keys SET claimed_by_team = (SELECT id FROM teams ORDER BY id OFFSET :client_id LIMIT 1), claimed_at = now()
+WHERE id = (
+    SELECT id FROM sponsor_keys
+    WHERE sponsor_slug = 'acme' AND claimed_by_team IS NULL
+    ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED
+) RETURNING key_value;
+SELECT pg_sleep(0.5);
+COMMIT;

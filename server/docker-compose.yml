@@ -1,0 +1,26 @@
+# Local dev databases. Kenny merges his services in here when he rebases.
+#   docker compose -f server/docker-compose.yml up -d
+#   DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres
+#   REDIS_URL=redis://127.0.0.1:6379
+# Dev-only password. Production (the droplet) uses its own .env, never this file.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      retries: 15
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 15
+volumes:
+  pgdata:
