@@ -13,7 +13,7 @@ use auth::{layer, policies, routes, AuthState, Codes, Keys, Role, Sender, Sessio
 use axum::{body::Body, http::Request, middleware::from_fn_with_state, Router};
 use ed25519_dalek::SigningKey;
 use fred::prelude::{Builder, Client, ClientLike, Config};
-use sqlx::{postgres::PgConnectOptions, PgPool};
+use sqlx::{postgres::PgConnectOptions, PgConnection, PgPool};
 use tower::ServiceExt;
 
 pub const NOW: i64 = 1_800_000_000;
@@ -32,10 +32,33 @@ pub async fn db(schema: &str) -> PgPool {
         .execute(&admin)
         .await
         .unwrap();
-    let opts = PgConnectOptions::from_str(&url).unwrap().options([("search_path", schema)]);
+    // public stays on the path only for the pgvector types, which live there.
+    let opts = PgConnectOptions::from_str(&url).unwrap().options([("search_path", format!("{schema},public"))]);
     let db = PgPool::connect_with(opts).await.unwrap();
-    sqlx::raw_sql(include_str!("../../../migrations/0001_users_and_auth.sql")).execute(&db).await.unwrap();
+    migrate(&mut db.acquire().await.unwrap()).await;
     db
+}
+
+/// Every `*.up.sql` in server/migrations in version order (the core schema first), as
+/// the server's runner applies them, into the connection's first search_path schema.
+/// pgvector is installed in public once beforehand, under a lock, because parallel
+/// tests would otherwise race to create it.
+pub async fn migrate(db: &mut PgConnection) {
+    sqlx::raw_sql("SELECT pg_advisory_lock(7231)").execute(&mut *db).await.unwrap();
+    let created = sqlx::raw_sql("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public").execute(&mut *db).await;
+    sqlx::raw_sql("SELECT pg_advisory_unlock(7231)").execute(&mut *db).await.unwrap();
+    created.unwrap();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations");
+    let mut ups: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().ends_with(".up.sql"))
+        .collect();
+    ups.sort();
+    for up in ups {
+        let sql = std::fs::read_to_string(&up).unwrap();
+        sqlx::raw_sql(&sql).execute(&mut *db).await.unwrap_or_else(|e| panic!("{}: {e}", up.display()));
+    }
 }
 
 /// A pool that never connects: Postgres is "down".
