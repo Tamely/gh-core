@@ -5,7 +5,7 @@ _Last updated: 2026-11-21_
 ## ⚠️ Core schema PR: takes priority for migrations (2026-11-21)
 **This set of changes is the precedent for the database.** Its migrations run **first**, before every other gh-core migration. Any migration whose number conflicts with it (sorts before it, uses the same number, or creates a table it creates) **changes its number and its SQL**, not this one.
 
-**What it is:** branch `ricky/schema` (worktree `.claude/worktrees/schema` in the fork clone), PR: _link below once opened_. It covers the schema ticket: the main PostgreSQL 16 + pgvector database, with reversible sqlx migrations for every core table.
+**What it is:** branch `ricky/schema` (worktree `.claude/worktrees/schema` in the fork clone), PR: [Tamely/gh-core#13](https://github.com/Tamely/gh-core/pull/13). It covers the schema ticket: the main PostgreSQL 16 + pgvector database, with reversible sqlx migrations for every core table.
 - `server/migrations/`: 11 reversible `up.sql` / `down.sql` pairs, versions **`20261101000000` to `20261101001000`**, one logical change each: extension and shared `set_updated_at()` trigger, `users`, `teams` + `team_members`, `presentation_rooms`, `entitlements` + `entitlement_scans`, `hardware_assets` + `hardware_loans`, `sponsor_keys`, `mentor_tickets`, `notification_dispatches`, `judging_queue`, `face_embeddings` + `nearest_faces()`.
 - `server/schema.sql`: the committed `pg_dump --schema-only` snapshot.
 - `server/seeds/seed.sql`: synthetic data (1,000 users, 250 teams, 25 rooms, 5 entitlements, 5,000 scans, 500 assets, 600 sponsor keys, 1,000 random unit 512-d vectors). Not a migration.
@@ -262,7 +262,7 @@ Web relies on the HttpOnly cookie. Native keeps the token in the Keychain / Keys
 ## Done for others
 | For | What was done | Link |
 |---|---|---|
-| Kenny | Your "database: schema gaps in design doc §5" need: team membership (`team_members`), `sponsor_keys`, face embeddings (`face_embeddings`), loan history (`hardware_assets` + `hardware_loans`), plus `entitlements`. Core schema PR | _link below once opened_ |
+| Kenny | Your "database: schema gaps in design doc §5" need: team membership (`team_members`), `sponsor_keys`, face embeddings (`face_embeddings`), loan history (`hardware_assets` + `hardware_loans`), plus `entitlements`. Core schema PR | [#13](https://github.com/Tamely/gh-core/pull/13) |
 | Josh | Picked the native secure-storage plugin (your "Which secure-storage plugin" need): `@aparajita/capacitor-secure-storage` 8.0.1, wired in PR 5 | [#11](https://github.com/Tamely/gh-core/pull/11) |
 
 ## Notes for the next session
