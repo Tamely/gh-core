@@ -2,7 +2,8 @@
 -- gh-core migration; later PRs use later timestamps.
 
 -- pgvector 0.8+ is required: iterative index scans (hnsw.iterative_scan) arrived in 0.8.
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Always in public, so per-schema test setups (search_path = test, public) share one copy.
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 DO $$
 BEGIN
     IF (SELECT string_to_array(extversion, '.')::int[] FROM pg_extension WHERE extname = 'vector') < ARRAY[0, 8] THEN
