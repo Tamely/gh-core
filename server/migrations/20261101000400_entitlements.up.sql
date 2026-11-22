@@ -3,11 +3,8 @@
 CREATE TABLE entitlements (
     entitlement_id VARCHAR(32) PRIMARY KEY CHECK (entitlement_id ~ '^[a-z0-9-]+$'), -- 'checkin', 'dinner-1', 'shirt'
     label TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now() -- lookup table, loaded before the event: no updated_at
 );
-CREATE TRIGGER entitlements_updated_at BEFORE UPDATE ON entitlements
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- Design doc §5 entitlement_scans. The primary key is the duplicate check: a second scan
 -- fails with 23505, or inserts nothing with ON CONFLICT DO NOTHING. It must stay a plain

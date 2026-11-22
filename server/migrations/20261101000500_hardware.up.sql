@@ -4,11 +4,8 @@
 CREATE TABLE hardware_assets (
     asset_qr VARCHAR(64) PRIMARY KEY, -- 'ASSET-001'
     category TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now() -- lookup table, loaded before the event: no updated_at
 );
-CREATE TRIGGER hardware_assets_updated_at BEFORE UPDATE ON hardware_assets
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- RESTRICT on user_id: a user with loan history can't be deleted by accident, since an
 -- unreturned loan would vanish with them. Clear their loans first.

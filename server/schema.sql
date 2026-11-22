@@ -66,7 +66,6 @@ CREATE TABLE public.entitlements (
     entitlement_id character varying(32) NOT NULL,
     label text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT entitlements_entitlement_id_check CHECK (((entitlement_id)::text ~ '^[a-z0-9-]+$'::text))
 );
 
@@ -80,8 +79,7 @@ CREATE TABLE public.face_embeddings (
 CREATE TABLE public.hardware_assets (
     asset_qr character varying(64) NOT NULL,
     category text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 CREATE TABLE public.hardware_loans (
@@ -312,11 +310,7 @@ CREATE INDEX sponsor_keys_unclaimed ON public.sponsor_keys USING btree (sponsor_
 
 CREATE INDEX team_members_team_id ON public.team_members USING btree (team_id);
 
-CREATE TRIGGER entitlements_updated_at BEFORE UPDATE ON public.entitlements FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
 CREATE TRIGGER face_embeddings_updated_at BEFORE UPDATE ON public.face_embeddings FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
-CREATE TRIGGER hardware_assets_updated_at BEFORE UPDATE ON public.hardware_assets FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 CREATE TRIGGER judging_queue_updated_at BEFORE UPDATE ON public.judging_queue FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
