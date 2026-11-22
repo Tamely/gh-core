@@ -164,7 +164,31 @@ Built in PR 1 ([Tamely/gh-core#7](https://github.com/Tamely/gh-core/pull/7)) and
 - `signIn(path, body)`: code, OAuth or judge exchange; a rejection leaves the current session alone
 - `api()`, `refresh()` (from `/me`) and `signOut()`
 
-Web relies on the HttpOnly cookie. Native keeps the token in the Keychain / Keystore and sends a Bearer header. `pnpm check` passes with 10 new tests. Not done: wiring into Josh's UI, and a run on a real device.
+Web relies on the HttpOnly cookie. Native keeps the token in the Keychain / Keystore and sends a Bearer header.
+
+**Native API calls (fixed 2026-11-21, commit `0fcc4ed`, local only).** The native app runs at `capacitor://localhost`, so a relative `/api` call never reaches the server. Native now calls `API_ORIGIN` through CapacitorHttp:
+- `API_ORIGIN` comes from `VITE_API_ORIGIN` and defaults to `https://app.geauxhack.org`.
+- CapacitorHttp means no CORS and no Origin header, so the server returns the token in the body.
+- `x-session-token` is readable.
+- The server needs no CORS change.
+
+**Stand-in for Josh's screens.** `/dev/auth` runs every auth call. It only exists in dev builds, or in a build with `VITE_AUTH_STANDIN=1`. `pnpm dev` proxies `/api` to `auth-dev serve`.
+
+**Tested 2026-11-21** against `auth-dev serve`. auth-dev used its own `standin` database, because the old dev database has a pre-audit 0001 migration.
+- Web, in the browser:
+  - code sign-in (the cookie isn't visible to JavaScript)
+  - /me returns 200
+  - a reload starts signed in with no network call
+  - sign-out, after which /me returns 401
+  - a judge placard gives `JUDGE_ROOM` with its `roomId`, and `exp` = the end of judging
+  - a tampered placard returns 401 and leaves the session as it was
+- Native, two ways:
+  - curl without an Origin header: the token comes in the body with no cookie, then Bearer → /me 200 → logout 204 → 401
+  - unit tests of the CapacitorHttp adapter
+
+`pnpm check` passes with 37 tests.
+
+**Not done:** a simulator or device run. This Mac has only the Command Line Tools: no full Xcode, no Android SDK. Also not done: wiring into Josh's real UI.
 
 ## Needs from others
 | For | What's needed | Why / blocks | By |
