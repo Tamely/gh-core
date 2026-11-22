@@ -1,0 +1,26 @@
+# Database schema: migrations up / down / up against server/schema.sql, seed, and the
+# schema ticket's acceptance checks (server/db-tests/run.sh).
+name: schema
+on:
+  pull_request:
+    paths: ["server/migrations/**", "server/seeds/**", "server/db-tests/**", "server/schema.sql", "server/docker-compose.yml", ".github/workflows/schema.yml"]
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SQLX_VERSION: 0.9.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: sqlx
+        with:
+          path: ~/.cargo/bin/sqlx
+          key: sqlx-cli-${{ env.SQLX_VERSION }}-${{ runner.os }}
+      - if: steps.sqlx.outputs.cache-hit != 'true'
+        run: cargo install sqlx-cli --version "$SQLX_VERSION" --locked --no-default-features --features postgres
+      - run: server/db-tests/run.sh
