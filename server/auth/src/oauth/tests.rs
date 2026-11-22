@@ -9,6 +9,26 @@ const NOW: i64 = 1_800_000_000;
 const ORIGIN: &str = "https://app.geauxhack.org";
 const VERIFIER: &str = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
 
+/// Every `*.up.sql` in server/migrations in version order (core schema first), like
+/// tests/common's `migrate`. pgvector goes in public once, under a lock, first.
+async fn migrate(db: &PgPool) {
+    let mut conn = db.acquire().await.unwrap();
+    sqlx::raw_sql("SELECT pg_advisory_lock(7231)").execute(&mut *conn).await.unwrap();
+    let created = sqlx::raw_sql("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public").execute(&mut *conn).await;
+    sqlx::raw_sql("SELECT pg_advisory_unlock(7231)").execute(&mut *conn).await.unwrap();
+    created.unwrap();
+    let mut ups: Vec<_> = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../migrations"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().ends_with(".up.sql"))
+        .collect();
+    ups.sort();
+    for up in ups {
+        let sql = std::fs::read_to_string(&up).unwrap();
+        sqlx::raw_sql(&sql).execute(&mut *conn).await.unwrap_or_else(|e| panic!("{}: {e}", up.display()));
+    }
+}
+
 async fn setup(schema: &str) -> Arc<AuthState> {
     let url = std::env::var("DATABASE_URL").expect("set DATABASE_URL");
     let admin = PgPool::connect(&url).await.unwrap();
@@ -17,8 +37,9 @@ async fn setup(schema: &str) -> Arc<AuthState> {
         .await
         .unwrap();
     let opts: PgConnectOptions = url.parse().unwrap();
-    let db = PgPool::connect_with(opts.options([("search_path", schema)])).await.unwrap();
-    sqlx::raw_sql(include_str!("../../../migrations/0001_users_and_auth.sql")).execute(&db).await.unwrap();
+    // public stays on the path only for the pgvector types, which live there.
+    let db = PgPool::connect_with(opts.options([("search_path", format!("{schema},public"))])).await.unwrap();
+    migrate(&db).await;
     let redis = Builder::from_config(RedisConfig::from_url(&std::env::var("REDIS_URL").unwrap()).unwrap())
         .with_performance_config(|c| c.default_command_timeout = Duration::from_secs(5))
         .build()
