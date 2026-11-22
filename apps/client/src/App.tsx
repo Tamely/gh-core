@@ -1,3 +1,4 @@
+import { lazy } from "solid-js";
 import { Home } from "./pages/Home";
 import { NotFound, placeholder } from "./pages/Placeholder";
 import { Router, type Route } from "./router";
@@ -53,6 +54,20 @@ const routes: Route[] = [
       "Our privacy policy will be published here.",
     ),
   },
+  // Auth stand-in (PR 5) until the real sign-in screens exist. Left out of
+  // production builds unless built with VITE_AUTH_STANDIN=1.
+  ...(import.meta.env.DEV || import.meta.env.VITE_AUTH_STANDIN === "1"
+    ? [
+        {
+          path: "/dev/auth",
+          component: lazy(() =>
+            import("./pages/AuthStandIn").then((m) => ({
+              default: m.AuthStandIn,
+            })),
+          ),
+        },
+      ]
+    : []),
 ];
 
 export function App() {
