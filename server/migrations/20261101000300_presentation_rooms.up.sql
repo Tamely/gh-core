@@ -13,7 +13,10 @@ CREATE TABLE presentation_rooms (
     judging_ends_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT presentation_rooms_window CHECK (judging_ends_at > judging_starts_at)
+    -- Both ends or neither: a half-set window would compare to NULL and pass a plain check.
+    CONSTRAINT presentation_rooms_window CHECK (
+        (judging_starts_at IS NULL) = (judging_ends_at IS NULL)
+        AND (judging_ends_at IS NULL OR judging_ends_at > judging_starts_at))
 );
 CREATE TRIGGER presentation_rooms_updated_at BEFORE UPDATE ON presentation_rooms
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();

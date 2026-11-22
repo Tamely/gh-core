@@ -14,8 +14,20 @@ CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
 
+CREATE FUNCTION public.mentor_tickets_reopen() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.status = 'CLAIMED' AND NEW.claimed_by IS NULL THEN
+        NEW.status := 'OPEN';
+        NEW.claimed_at := NULL;
+    END IF;
+    RETURN NEW;
+END
+$$;
+
 CREATE FUNCTION public.nearest_faces(query public.vector, k integer DEFAULT 50) RETURNS TABLE(user_id uuid, distance double precision)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE STRICT
     SET "hnsw.iterative_scan" TO 'relaxed_order'
     SET "hnsw.ef_search" TO '100'
     SET enable_seqscan TO 'off'
@@ -112,6 +124,8 @@ CREATE TABLE public.mentor_tickets (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     claimed_at timestamp with time zone,
     resolved_at timestamp with time zone,
+    CONSTRAINT mentor_tickets_claimed CHECK ((((status)::text <> 'CLAIMED'::text) OR ((claimed_by IS NOT NULL) AND (claimed_at IS NOT NULL)))),
+    CONSTRAINT mentor_tickets_resolved CHECK ((((status)::text <> 'RESOLVED'::text) OR (resolved_at IS NOT NULL))),
     CONSTRAINT mentor_tickets_status_check CHECK (((status)::text = ANY ((ARRAY['OPEN'::character varying, 'CLAIMED'::character varying, 'RESOLVED'::character varying, 'CANCELED'::character varying])::text[])))
 );
 
@@ -145,7 +159,7 @@ CREATE TABLE public.presentation_rooms (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT presentation_rooms_room_id_check CHECK (((room_id)::text ~ '^[A-Za-z0-9_-]+$'::text)),
     CONSTRAINT presentation_rooms_token_version_check CHECK ((token_version > 0)),
-    CONSTRAINT presentation_rooms_window CHECK ((judging_ends_at > judging_starts_at))
+    CONSTRAINT presentation_rooms_window CHECK ((((judging_starts_at IS NULL) = (judging_ends_at IS NULL)) AND ((judging_ends_at IS NULL) OR (judging_ends_at > judging_starts_at))))
 );
 
 CREATE TABLE public.sponsor_keys (
@@ -195,7 +209,7 @@ CREATE TABLE public.users (
     live_activity_token text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT users_email_check CHECK ((email = lower(email))),
+    CONSTRAINT users_email_check CHECK (((email = lower(btrim(email))) AND (email <> ''::text))),
     CONSTRAINT users_email_or_phone CHECK (((email IS NOT NULL) OR (phone_e164 IS NOT NULL))),
     CONSTRAINT users_phone_e164_check CHECK ((phone_e164 ~ '^\+[1-9][0-9]{1,14}$'::text)),
     CONSTRAINT users_travel_reimbursement_cap_cents_check CHECK ((travel_reimbursement_cap_cents >= 0))
@@ -305,6 +319,8 @@ CREATE TRIGGER face_embeddings_updated_at BEFORE UPDATE ON public.face_embedding
 CREATE TRIGGER hardware_assets_updated_at BEFORE UPDATE ON public.hardware_assets FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 CREATE TRIGGER judging_queue_updated_at BEFORE UPDATE ON public.judging_queue FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TRIGGER mentor_tickets_reopen BEFORE UPDATE OF claimed_by ON public.mentor_tickets FOR EACH ROW EXECUTE FUNCTION public.mentor_tickets_reopen();
 
 CREATE TRIGGER mentor_tickets_updated_at BEFORE UPDATE ON public.mentor_tickets FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 

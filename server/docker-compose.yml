@@ -5,18 +5,18 @@
 # Dev-only password. Production (the droplet) uses its own .env, never this file.
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.7-pg16 # pinned: the schema checks compare exact pg_dump output
     environment:
       POSTGRES_PASSWORD: postgres
     ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
       interval: 2s
       retries: 15
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: ["redis-server", "--save", ""]
     ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

@@ -3,8 +3,8 @@
 -- table (face_embeddings) so deleting it or the user is one row, with its own index.
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    -- Verified addresses only, lowercased. An SMS-only account has no email, and the reverse.
-    email TEXT UNIQUE CHECK (email = lower(email)),
+    -- Verified addresses only, trimmed and lowercased. An SMS-only account has no email, and the reverse.
+    email TEXT UNIQUE CHECK (email = lower(btrim(email)) AND email <> ''),
     phone_e164 TEXT UNIQUE CHECK (phone_e164 ~ '^\+[1-9][0-9]{1,14}$'),
     -- Filled in by the application, so empty right after a first sign-in.
     full_name TEXT,

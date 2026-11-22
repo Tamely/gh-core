@@ -1,6 +1,6 @@
 # Ricky: handoff
 
-_Last updated: 2026-11-21_
+_Last updated: 2026-11-22_
 
 ## ⚠️ Core schema PR: takes priority for migrations (2026-11-21)
 **This set of changes is the precedent for the database.** Its migrations run **first**, before every other gh-core migration. Any migration whose number conflicts with it (sorts before it, uses the same number, or creates a table it creates) **changes its number and its SQL**, not this one.
@@ -13,6 +13,19 @@ _Last updated: 2026-11-21_
 - `server/docker-compose.yml`: same file as the auth PRs' (identical, so it merges cleanly).
 
 **Migration numbering rule (everyone):** use timestamps (`sqlx migrate add -r <name>` makes a reversible pair with the current time). Nothing may sort at or before `20261101001000`. Tables this PR creates are changed later with `ALTER TABLE`, never created again. Every migration is an `up.sql` / `down.sql` pair, because the CI check runs everything down and up again.
+
+**Review fixes (2026-11-22):** a three-part review of #13 (migrations, tests/CI, redundancy) found no blockers; these were fixed in place (the core migrations aren't merged anywhere yet):
+- `presentation_rooms`: the judging window is both ends or neither. A half-set window used to pass the check.
+- `mentor_tickets`: `CLAIMED` needs `claimed_by` + `claimed_at`, `RESOLVED` needs `resolved_at`. A trigger reopens a claimed ticket when its mentor is unset, including when the mentor's account is deleted (`ON DELETE SET NULL`); before, it stayed `CLAIMED` with no owner forever.
+- `users.email`: also trimmed and non-empty.
+- `nearest_faces` is `STRICT`: `k = NULL` returns nothing instead of every row. `search_path` is deliberately not pinned, because the auth tests run the migrations in their own schemas.
+- The extensions down drops `vector` only when no table anywhere still uses it, so one test schema's down can't break another's.
+- Tests: the "duplicate fails at COMMIT, not before" check could pass when the UPDATE itself failed; fixed. The thresholded recall check now uses queries that straddle 0.68 (about half match) and fails if `nearest_faces` returns anything past the threshold. New check for the room window, ticket rules and the reopen trigger. Each was sabotage-checked.
+- `docker-compose.yml`: Postgres pinned to `pgvector/pgvector:0.8.7-pg16` (exact dumps are compared) and the health check uses TCP. **Auth PRs: merge `ricky/schema` again** to pick up the changed core migrations and compose file (no conflicts expected; they don't edit those files).
+- CI: `permissions: contents: read`; pushes to main run the check unfiltered.
+- Removed redundant test code (repeat schema diff, pgbench grep, DISTINCT counts, double VERBOSITY, default Redis/psql settings) and the README's copy of the check list.
+- **Dev databases that ran the earlier core migrations:** `docker compose -f server/docker-compose.yml down -v` (sqlx sees the changed checksums).
+- Not changed: same team queued twice in a room (may be intended; add `UNIQUE (room_id, team_id)` if not), and ids in the seed are still random UUIDs (the comment now says so).
 
 **What had to change elsewhere because of this:**
 - **Done (2026-11-21): the auth PRs are renumbered** and each one merges `ricky/schema`, so their tests run on top of the core schema:

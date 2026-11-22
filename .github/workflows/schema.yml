@@ -6,7 +6,8 @@ on:
     paths: ["server/migrations/**", "server/seeds/**", "server/db-tests/**", "server/schema.sql", "server/docker-compose.yml", ".github/workflows/schema.yml"]
   push:
     branches: [main]
-    paths: ["server/migrations/**", "server/seeds/**", "server/db-tests/**", "server/schema.sql", "server/docker-compose.yml", ".github/workflows/schema.yml"]
+permissions:
+  contents: read
 jobs:
   schema:
     runs-on: ubuntu-latest

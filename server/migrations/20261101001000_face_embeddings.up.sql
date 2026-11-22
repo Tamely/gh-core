@@ -18,7 +18,7 @@ CREATE INDEX face_embeddings_embedding ON face_embeddings
 -- turns that off; ef_search is tuned for recall >= 0.95 (server/db-tests checks both).
 CREATE FUNCTION nearest_faces(query vector(512), k INT DEFAULT 50)
 RETURNS TABLE (user_id UUID, distance DOUBLE PRECISION)
-LANGUAGE sql STABLE
+LANGUAGE sql STABLE STRICT -- k = NULL returns nothing, not every row
 SET hnsw.iterative_scan = relaxed_order
 SET hnsw.ef_search = 100
 SET enable_seqscan = off

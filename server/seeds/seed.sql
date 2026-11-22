@@ -1,7 +1,8 @@
 -- Synthetic dev and test data. Not a migration: run it once on a freshly migrated,
 -- empty database:
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/seeds/seed.sql
--- Fixed random seed, so every run makes the same data.
+-- Fixed random seed, so random() values (vectors, timestamps) repeat between runs. Ids
+-- come from gen_random_uuid(), so anything ordered by id differs from run to run.
 BEGIN;
 SELECT setseed(0.42) \gset
 

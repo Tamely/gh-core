@@ -2,7 +2,6 @@
 -- database, then does the checks that need COMMIT or several connections.
 -- Every check raises on failure; results are printed as NOTICEs.
 \set ON_ERROR_STOP 1
-SET client_min_messages = notice;
 
 -- Rules for every table: every foreign key picks CASCADE, RESTRICT or SET NULL (never the
 -- default NO ACTION), and every foreign key's columns lead some index.
@@ -118,9 +117,39 @@ END
 $$;
 ROLLBACK;
 
+-- Status rules: a room's judging window is both ends or neither; a CLAIMED ticket has a
+-- mentor; deleting the mentor puts their claimed ticket back in the open queue.
+BEGIN;
+DO $$
+DECLARE m uuid; t uuid; st text;
+BEGIN
+    BEGIN
+        INSERT INTO presentation_rooms (room_id, track, floor_number, svg_x, svg_y, judging_starts_at)
+            VALUES ('HALF-WINDOW', 'GENERAL', 1, 0, 0, now());
+        RAISE EXCEPTION 'a room with only a judging start time was accepted';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+    BEGIN
+        INSERT INTO mentor_tickets (location_label, svg_x, svg_y, tags, description, status, claimed_at)
+            VALUES ('Table 1', 0, 0, '{}', 'help', 'CLAIMED', now());
+        RAISE EXCEPTION 'a CLAIMED ticket with no mentor was accepted';
+    EXCEPTION WHEN check_violation THEN NULL;
+    END;
+    INSERT INTO users (email) VALUES ('mentor@example.invalid') RETURNING id INTO m;
+    INSERT INTO mentor_tickets (location_label, svg_x, svg_y, tags, description, status, claimed_by, claimed_at)
+        VALUES ('Table 1', 0, 0, '{}', 'help', 'CLAIMED', m, now()) RETURNING id INTO t;
+    DELETE FROM users WHERE id = m;
+    SELECT status INTO st FROM mentor_tickets WHERE id = t;
+    IF st IS DISTINCT FROM 'OPEN' THEN RAISE EXCEPTION 'deleting the mentor left the ticket %', st; END IF;
+    RAISE NOTICE 'ok: half judging window rejected, CLAIMED needs a mentor, deleting the mentor reopens the ticket';
+END
+$$;
+ROLLBACK;
+
 -- Vector search, with nearest_faces' own settings (iterative scan, ef_search, index
 -- only) applied to this session. 100 query vectors: 50 noisy copies of seeded faces
--- (cosine similarity around 0.8, so the 0.68 threshold has matches) and 50 random ones.
+-- with rising noise (cosine similarity to their source from about 0.77 down to 0.6, so
+-- the 0.68 threshold splits them) and 50 random ones (no matches).
 -- Latency is timed in its own loop; the exact scans for recall run afterwards, so they
 -- don't evict the index from the CPU cache between timed queries.
 SELECT count(set_config(split_part(c, '=', 1), split_part(c, '=', 2), false)) AS settings
@@ -128,7 +157,7 @@ FROM pg_proc, unnest(proconfig) c WHERE proname = 'nearest_faces' \gset
 SELECT setseed(0.7) \gset
 CREATE TEMP TABLE queries AS
     SELECT l2_normalize((SELECT embedding FROM face_embeddings ORDER BY user_id OFFSET i LIMIT 1)
-                        + ARRAY(SELECT random_normal(0, 0.03) FROM generate_series(1, 512) WHERE i IS NOT NULL)::vector(512)) AS v
+                        + ARRAY(SELECT random_normal(0, 0.036 + 0.026 * i / 49) FROM generate_series(1, 512))::vector(512)) AS v
     FROM generate_series(0, 49) i
     UNION ALL
     SELECT l2_normalize(ARRAY(SELECT random_normal() FROM generate_series(1, 512) WHERE i IS NOT NULL)::vector(512))
@@ -136,7 +165,7 @@ CREATE TEMP TABLE queries AS
 DO $$
 DECLARE
     q record; j json; times float8[] := '{}'; p99 float8; p50 float8;
-    hit int := 0; total int := 0; hit_t int := 0; total_t int := 0;
+    hit int := 0; total int := 0; hit_t int := 0; total_t int := 0; extra_t int := 0;
     approx uuid[]; exact uuid[]; approx_t uuid[]; exact_t uuid[];
     -- The pattern from nearest_faces: top k by the index, then the threshold.
     search text := 'WITH nearest AS MATERIALIZED (SELECT user_id, embedding <=> %L::vector(512) AS distance '
@@ -173,9 +202,13 @@ BEGIN
         total := total + cardinality(exact);
         hit_t := hit_t + coalesce(cardinality(ARRAY(SELECT unnest(approx_t) INTERSECT SELECT unnest(exact_t))), 0);
         total_t := total_t + coalesce(cardinality(exact_t), 0);
+        extra_t := extra_t + coalesce(cardinality(ARRAY(SELECT unnest(approx_t) EXCEPT SELECT unnest(exact_t))), 0);
     END LOOP;
     IF hit::float8 / total < 0.95 THEN RAISE EXCEPTION 'top-50 recall is %, needs 0.95', hit::float8 / total; END IF;
-    IF total_t = 0 THEN RAISE EXCEPTION 'no query had a match over the threshold'; END IF;
+    -- Each noisy query can only match its source, so 1..49 matches means the threshold
+    -- both kept and dropped some; nothing past the threshold may come back.
+    IF total_t NOT BETWEEN 1 AND 49 THEN RAISE EXCEPTION 'the queries did not straddle the threshold: % matches', total_t; END IF;
+    IF extra_t > 0 THEN RAISE EXCEPTION 'nearest_faces returned % rows past the threshold', extra_t; END IF;
     IF hit_t::float8 / total_t < 0.95 THEN RAISE EXCEPTION 'thresholded recall is %, needs 0.95', hit_t::float8 / total_t; END IF;
     RAISE NOTICE 'ok: vector search p99 % ms (median %) over 100 queries, HNSW index used, top-50 recall %, thresholded recall % (% matches)',
         round(p99::numeric, 3), round(p50::numeric, 3), round(hit::numeric / total, 4), round(hit_t::numeric / total_t, 4), total_t;

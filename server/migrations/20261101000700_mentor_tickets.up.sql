@@ -13,8 +13,24 @@ CREATE TABLE mentor_tickets (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     claimed_at TIMESTAMPTZ,
-    resolved_at TIMESTAMPTZ
+    resolved_at TIMESTAMPTZ,
+    CONSTRAINT mentor_tickets_claimed CHECK (status <> 'CLAIMED' OR (claimed_by IS NOT NULL AND claimed_at IS NOT NULL)),
+    CONSTRAINT mentor_tickets_resolved CHECK (status <> 'RESOLVED' OR resolved_at IS NOT NULL)
 );
+-- A claimed ticket whose mentor is unset (unclaimed, or the mentor's account deleted, which
+-- ON DELETE SET NULL does) goes back to the open queue instead of being stuck CLAIMED.
+CREATE FUNCTION mentor_tickets_reopen() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.status = 'CLAIMED' AND NEW.claimed_by IS NULL THEN
+        NEW.status := 'OPEN';
+        NEW.claimed_at := NULL;
+    END IF;
+    RETURN NEW;
+END
+$$;
+CREATE TRIGGER mentor_tickets_reopen BEFORE UPDATE OF claimed_by ON mentor_tickets
+    FOR EACH ROW EXECUTE FUNCTION mentor_tickets_reopen();
 CREATE TRIGGER mentor_tickets_updated_at BEFORE UPDATE ON mentor_tickets
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE INDEX mentor_tickets_team_id ON mentor_tickets (team_id);
